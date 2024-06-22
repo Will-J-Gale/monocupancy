@@ -11,6 +11,7 @@ from python_input import Input
 
 CAM_IMAGE_WIDTH = 1600
 CAM_IMAGE_HEIGHT = 900
+CALCULATE_BBOX = True #Stupid hack to keep camera in same place, god o3d has a weird userspace...
 
 def rotate_vector(x, y, angle):
     new_x = x * cos(angle) - y * sin(angle)
@@ -83,7 +84,7 @@ def create_lidar_geometries(vis, pcd_path, label_path, colourmap, car_ego, boxes
     colours = [colourmap[label] for label in pcd_labels]
     pcd.colors = o3d.utility.Vector3dVector(colours)
 
-    vis.add_geometry(pcd)
+    vis.add_geometry(pcd, CALCULATE_BBOX)
 
     for box in boxes:
         box.translate(-np.array(car_position))
@@ -96,7 +97,7 @@ def create_lidar_geometries(vis, pcd_path, label_path, colourmap, car_ego, boxes
         vis.add_geometry(bbox, False)
 
     mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=10, origin=[0, 0, 0])
-    vis.add_geometry(mesh_frame)
+    vis.add_geometry(mesh_frame, False)
 
     fx = cam_extrinsics["camera_intrinsic"][0][0]
     fy = cam_extrinsics["camera_intrinsic"][1][1]
@@ -138,10 +139,12 @@ def draw_lidar_data(vis, nusc, sample, colourmap, original_car_ego):
     )
 
 def main():
+    global CALCULATE_BBOX
     #Create window visualizer
     vis = o3d.visualization.Visualizer()
     vis.create_window()
     opt = vis.get_render_option()
+
     opt.background_color = np.asarray([0, 0, 0])
     opt.show_coordinate_frame = True
 
@@ -162,6 +165,7 @@ def main():
     original_car_ego = nusc.get("ego_pose", lidar_token)
 
     draw_lidar_data(vis, nusc, sample, colourmap, original_car_ego) 
+    CALCULATE_BBOX = False
 
     inp = Input()
 
@@ -177,6 +181,7 @@ def main():
                 vis.clear_geometries()
                 sample = nusc.get("sample", sample["next"]) 
                 draw_lidar_data(vis, nusc, sample, colourmap, original_car_ego)
+                # o3d.io.write_pinhole_camera_parameters("camera_params.json", view.convert_to_pinhole_camera_parameters())
             
             if(inp.get_key_down("a")):
                 if(sample["prev"] == str()):
