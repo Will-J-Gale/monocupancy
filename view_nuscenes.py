@@ -21,26 +21,7 @@ class CarEgo:
         self.velocity = np.array([0, 0, 0], dtype=np.float64)
         self.prev_car_ego = None
     
-    def update(self, car_ego):
-        self.rotation = np.array(car_ego["rotation"])
-
-        if(self.prev_car_ego is not None):
-            car_position = np.array(car_ego["translation"])
-            prev_car_position = np.array(self.prev_car_ego["translation"])
-
-            car_quat = Quaternion(self.rotation)
-
-            #Need to some how get car velociy vector based on the cars rotation
-            # self.velocity = prev_car_position - car_position
-            self.velocity[0], self.velocity[1] = rotate_2d_vector(self.velocity[0], self.velocity[1], car_quat.yaw_pitch_roll[0])
-
-            self.position += -self.velocity
-        else:
-            self.position = np.array(car_ego["translation"])
-
-        self.prev_car_ego = car_ego
-    
-    def update2(self, pose):
+    def update(self, pose):
         if(self.prev_car_ego is not None):
             current_pos = np.array(pose["pos"])
             prev_pos = np.array(self.prev_car_ego["pos"])
@@ -49,6 +30,13 @@ class CarEgo:
             self.position += self.velocity
 
         self.prev_car_ego = pose
+
+class PointCloudTimeseries:
+    def __init__(self):
+        self.geometries = []
+    
+    def add_geometry(self, lidar_geometry):
+        self.geometries.append(lidar_geometry)
 
 class TimestmapData:
     def __init__(self, data:list, timestamps:list):
@@ -78,7 +66,7 @@ def create_line(start, end, colour):
 
     return line_set
 
-def create_frustum(position, rotation, hfov_radians, vfov_radians, distance):
+def create_frustum_geometry(position, rotation, hfov_radians, vfov_radians, distance):
     hfov_half = hfov_radians / 2
     vfov_hald = vfov_radians / 2
     
@@ -112,88 +100,55 @@ def create_frustum(position, rotation, hfov_radians, vfov_radians, distance):
     line_set.translate(position)
     return line_set
 
-def create_lidar_geometries(vis, pcd_path, label_path, colourmap, car_ego, boxes, lidar, cam_extrinsics, car_ego2:CarEgo):
-    car_position = np.array(car_ego["translation"])
-    car_rotation = np.array(car_ego["rotation"])
-    lidar_position = np.array(lidar["translation"])
-    lidar_rotation = Quaternion(np.array(lidar["rotation"]))
+def create_lidar_geometries(pcd_path, label_path, colourmap, car_ego):
+    car_rotation = Quaternion(np.array(car_ego["rotation"]))
     pcd_labels = np.fromfile(label_path, dtype=np.uint8)
-    pcd_bin = np.fromfile(pcd_path, dtype=np.float32).reshape(-1, 5)
-    pcd_bin = pcd_bin[..., 0:3]
+    point_cloud_raw = np.fromfile(pcd_path, dtype=np.float32).reshape(-1, 5)
+    point_cloud_raw = point_cloud_raw[..., 0:3]
 
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(pcd_bin)
-    # pcd.rotate(lidar_rotation.rotation_matrix, [0,0,0])
+    point_cloud_geometry = o3d.geometry.PointCloud()
+    point_cloud_geometry.points = o3d.utility.Vector3dVector(point_cloud_raw)
     
-    car_quat = Quaternion(car_rotation)
-
-    # pred_pos = car_ego2.position
-    # pred_pos[0], pred_pos[1] = rotate_2d_vector(pred_pos[0], pred_pos[1], car_quat.yaw_pitch_roll[0])
-    # pcd.translate(pred_pos, relative=False)
-    pcd.rotate(car_quat.rotation_matrix, [0,0,0])
-
-    
-    pos = car_ego2.position.copy()
-    pos[0], pos[1] = rotate_2d_vector(pos[0], pos[1], radians(-90))
-    pcd.translate(pos, relative=False)
-    # pcd.translate(lidar_position, relative=True)
-
-    vel = car_ego2.velocity.copy()
-    vel[0], vel[1] = rotate_2d_vector(vel[0], vel[1], radians(-90))
-    # line = create_line(np.zeros_like(car_ego2.velocity), car_ego2.velocity, [0,0,0])
-    # line2 = create_line(np.zeros_like(car_ego2.velocity), vel, [0,1,0])
-    # vis.add_geometry(line, False)
-    # vis.add_geometry(line2, False)
-    
-    # Clustering
-    # with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Debug) as cm:
-    #     labels = np.array(pcd.cluster_dbscan(eps=1, min_points=3, print_progress=False))
-
-    # max_label = labels.max()
-    # colors = plt.get_cmap("tab20")(labels / (max_label if max_label > 0 else 1))
-    # # colors[labels < 0] = 0
-    # pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
-    
+    point_cloud_geometry.rotate(car_rotation.rotation_matrix, [0,0,0])
     colours = [colourmap[label] for label in pcd_labels]
-    pcd.colors = o3d.utility.Vector3dVector(colours)
+    point_cloud_geometry.colors = o3d.utility.Vector3dVector(colours)
 
-    vis.add_geometry(pcd, CALCULATE_BBOX)
+    return point_cloud_geometry
 
-    # line = create_line(car_ego2.position, car_ego2.position + car_ego2.velocity, [1.0, 0.0, 0.0])
-    zero = np.array([0, 0, 0], dtype=np.float64)
-    line = create_line(zero, car_ego2.velocity, [1.0, 0.0, 0.0])
-    vis.add_geometry(line, False)
+def generate_boxes(boxes, car_position, car_rotation):
+    box_geometries = []
+    for box in boxes:
+        box.translate(-np.array(car_position))
+        box.rotate(Quaternion(car_rotation))
+        w, l, h = box.wlh
+        x, y, z = box.center
 
-    # for box in boxes:
-    #     box.translate(-np.array(car_position))
-    #     box.rotate(Quaternion(car_rotation))
-    #     w, l, h = box.wlh
-    #     x, y, z = box.center
+        bbox = o3d.geometry.OrientedBoundingBox((x, y, z), box.rotation_matrix, (l, w, h))
+        bbox.color = (1.0, 0.1, 0.0)
+        box_geometries.append(bbox)
 
-    #     bbox = o3d.geometry.OrientedBoundingBox((x, y, z), box.rotation_matrix, (l, w, h))
-    #     bbox.color = (1.0, 0.1, 0.0)
-    #     vis.add_geometry(bbox, False)
+    return box_geometries
 
-    mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=10, origin=[0, 0, 0])
-    vis.add_geometry(mesh_frame, False)
-
+def generate_frustum_from_camera_extrinsics(cam_extrinsics, rotation):
+    # Create frustum
     fx = cam_extrinsics["camera_intrinsic"][0][0]
     fy = cam_extrinsics["camera_intrinsic"][1][1]
 
     cam_hfov = 2 * np.arctan2(CAM_IMAGE_WIDTH, 2 * fx)
     cam_vfov = 2 * np.arctan2(CAM_IMAGE_HEIGHT, 2 * fy)
 
-    # frustum = create_frustum(
-    #     cam_extrinsics["translation"], 
-    #     # Quaternion(car_rotation).rotation_matrix,
-    #     Quaternion(lidar_rotation).rotation_matrix,
-    #     cam_hfov,
-    #     cam_vfov,
-    #     100
-    # )
-    # vis.add_geometry(frustum, False)
+    frustum = create_frustum_geometry(
+        cam_extrinsics["translation"], 
+        # Quaternion(car_rotation).rotation_matrix,
+        Quaternion(rotation).rotation_matrix,
+        cam_hfov,
+        cam_vfov,
+        100
+    )
+    return frustum
 
-def draw_lidar_data(vis, nusc, sample, colourmap, car_ego:CarEgo, pose_dataset:TimestmapData):
+def draw_lidar_data(vis, nusc, sample, colourmap, car_ego:CarEgo, pose_dataset:TimestmapData, point_cloud_timeseries:PointCloudTimeseries):
+    global CALCULATE_BBOX
     lidar_token = sample['data']['LIDAR_TOP']
     lidar = nusc.get('sample_data', lidar_token)
     cam_front = nusc.get('sample_data', sample['data']['CAM_FRONT'])
@@ -204,29 +159,26 @@ def draw_lidar_data(vis, nusc, sample, colourmap, car_ego:CarEgo, pose_dataset:T
     pcd_labels_path = os.path.join('/media/storage/datasets/nuscenes-v1.0-mini/lidarseg/v1.0-mini', lidar_token + '_lidarseg.bin')
     ego = nusc.get("ego_pose", lidar_token)
 
-    # prev_ego = None
-    # if(not sample["prev"] == str()):
-    #     prev_sample = nusc.get("sample", sample["prev"])
-    #     prev_lidar_token = prev_sample['data']['LIDAR_TOP']
-    #     prev_ego = nusc.get("ego_pose", prev_lidar_token)
-    
-    # car_ego.update(ego)
     pose = pose_dataset.get_data_at_timestamp(lidar["timestamp"])
-    car_ego.update2(pose)
+    car_ego.update(pose)
 
-    create_lidar_geometries(
-        vis,
+    lidar_geometry = create_lidar_geometries(
         pcd_path, 
         pcd_labels_path, 
         colourmap, 
-        ego, 
-        boxes, 
-        lidar_extrinsics,
-        cam_front_extrinsics,
-        car_ego
+        ego
     )
 
+    pos = car_ego.position.copy()
+    pos[0], pos[1] = rotate_2d_vector(pos[0], pos[1], radians(-90)) #No idea why it needs rotating -90 degrees, maybe because car forward is actuall X not Y?
+    lidar_geometry.translate(pos, relative=False)
+    
+    point_cloud_timeseries.add_geometry(lidar_geometry)
 
+    for geometry in point_cloud_timeseries.geometries:
+        vis.add_geometry(geometry, CALCULATE_BBOX)
+
+    return lidar_geometry
 
 def main():
     global CALCULATE_BBOX
@@ -268,7 +220,8 @@ def main():
     pose_dataset = TimestmapData(pose, [p["utime"] for p in pose])
 
     car_ego = CarEgo()
-    draw_lidar_data(vis, nusc, sample, colourmap, car_ego, pose_dataset) 
+    point_cloud_timeseries = PointCloudTimeseries()
+    draw_lidar_data(vis, nusc, sample, colourmap, car_ego, pose_dataset, point_cloud_timeseries) 
     CALCULATE_BBOX = False
 
     inp = Input()
@@ -284,7 +237,7 @@ def main():
 
                 vis.clear_geometries()
                 sample = nusc.get("sample", sample["next"]) 
-                draw_lidar_data(vis, nusc, sample, colourmap, car_ego, pose_dataset)
+                previous_lidar = draw_lidar_data(vis, nusc, sample, colourmap, car_ego, pose_dataset, point_cloud_timeseries)
             
             if(inp.get_key_down("a")):
                 if(sample["prev"] == str()):
@@ -292,7 +245,7 @@ def main():
 
                 vis.clear_geometries()
                 sample = nusc.get("sample", sample["prev"]) 
-                draw_lidar_data(vis, nusc, sample, colourmap, car_ego, pose_dataset)
+                draw_lidar_data(vis, nusc, sample, colourmap, car_ego, pose_dataset, point_cloud_timeseries)
             
             vis.update_renderer()
         except KeyboardInterrupt:
