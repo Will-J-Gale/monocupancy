@@ -14,7 +14,7 @@ CAM_IMAGE_WIDTH = 1600
 CAM_IMAGE_HEIGHT = 900
 CALCULATE_BBOX = True #Stupid hack to keep camera in same place, god o3d has a weird userspace...
 
-class CarEgo:
+class CarPositionTimestamp:
     def __init__(self):
         self.position = np.array([0.0, 0.0, 0], dtype=np.float64)
         self.rotation = np.array([0, 0, 0, 0], dtype=np.float64)
@@ -100,8 +100,7 @@ def create_frustum_geometry(position, rotation, hfov_radians, vfov_radians, dist
     line_set.translate(position)
     return line_set
 
-def create_lidar_geometries(pcd_path, label_path, colourmap, static_object_ids, car_ego):
-    car_rotation = Quaternion(np.array(car_ego["rotation"]))
+def create_lidar_geometries(pcd_path, label_path, colourmap, static_object_ids):
     pcd_labels = np.fromfile(label_path, dtype=np.uint8)
     point_cloud_raw = np.fromfile(pcd_path, dtype=np.float32).reshape(-1, 5)
     point_cloud_raw = point_cloud_raw[..., 0:3]
@@ -125,12 +124,10 @@ def create_lidar_geometries(pcd_path, label_path, colourmap, static_object_ids, 
     static_lidar_geometry = o3d.geometry.PointCloud()
     static_lidar_geometry.points = o3d.utility.Vector3dVector(static_points)
     static_lidar_geometry.colors = o3d.utility.Vector3dVector(static_colours)
-    static_lidar_geometry.rotate(car_rotation.rotation_matrix, [0,0,0])
 
     dynamic_lidar_geometry = o3d.geometry.PointCloud()
     dynamic_lidar_geometry.points = o3d.utility.Vector3dVector(dynamic_points)
     dynamic_lidar_geometry.colors = o3d.utility.Vector3dVector(dynamic_colours)
-    dynamic_lidar_geometry.rotate(car_rotation.rotation_matrix, [0,0,0])
 
     return static_lidar_geometry, dynamic_lidar_geometry
 
@@ -166,17 +163,27 @@ def generate_frustum_from_camera_extrinsics(cam_extrinsics, rotation):
     )
     return frustum
 
-def draw_lidar_data(vis, nusc, sample, colourmap, static_object_ids, car_ego:CarEgo, pose_dataset:TimestmapData, point_cloud_timeseries:PointCloudTimeseries):
+def draw_lidar_data(
+        vis:o3d.visualization.Visualizer, 
+        nusc, 
+        sample:dict, 
+        colourmap:dict, 
+        static_object_ids:list, 
+        car_ego:CarPositionTimestamp, 
+        pose_dataset:TimestmapData, 
+        point_cloud_timeseries:PointCloudTimeseries):
     global CALCULATE_BBOX
     lidar_token = sample['data']['LIDAR_TOP']
     lidar = nusc.get('sample_data', lidar_token)
     cam_front = nusc.get('sample_data', sample['data']['CAM_FRONT'])
     cam_front_extrinsics = nusc.get('calibrated_sensor', cam_front['calibrated_sensor_token'])
     lidar_extrinsics = nusc.get('calibrated_sensor', lidar['calibrated_sensor_token'])
+    lidar_origin = np.array(lidar_extrinsics['translation'])
     boxes = nusc.get_boxes(lidar_token)
     pcd_path = nusc.get_sample_data_path(lidar_token)
     pcd_labels_path = os.path.join('/media/storage/datasets/nuscenes-v1.0-mini/lidarseg/v1.0-mini', lidar_token + '_lidarseg.bin')
     ego = nusc.get("ego_pose", lidar_token)
+    car_rotation = Quaternion(ego["rotation"])
 
     pose = pose_dataset.get_data_at_timestamp(lidar["timestamp"])
     car_ego.update(pose)
@@ -185,21 +192,27 @@ def draw_lidar_data(vis, nusc, sample, colourmap, static_object_ids, car_ego:Car
         pcd_path, 
         pcd_labels_path, 
         colourmap, 
-        static_object_ids,
-        ego
+        static_object_ids
     )
 
     pos = car_ego.position.copy()
-    pos[0], pos[1] = rotate_2d_vector(pos[0], pos[1], radians(-90)) #No idea why it needs rotating -90 degrees, maybe because car forward is actuall X not Y?
+    pos[0], pos[1] = rotate_2d_vector(pos[0], pos[1], radians(-90)) #No idea why it needs rotating -90 degrees, maybe because car forward is actually X not Y?
+    static_lidar_geometry.rotate(car_rotation.rotation_matrix, [0,0,0])
     static_lidar_geometry.translate(pos, relative=False)
+    # static_lidar_geometry.translate(-lidar_origin, relative=True)
+    dynamic_lidar_geometry.rotate(car_rotation.rotation_matrix, [0,0,0])
     dynamic_lidar_geometry.translate(pos, relative=False) 
-    
+    # dynamic_lidar_geometry.translate(-lidar_origin, relative=True)
+
     point_cloud_timeseries.add_geometry(static_lidar_geometry)
 
     for geometry in point_cloud_timeseries.geometries:
         vis.add_geometry(geometry, CALCULATE_BBOX)
     
     vis.add_geometry(dynamic_lidar_geometry, CALCULATE_BBOX)
+
+    mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=2, origin=pos)
+    vis.add_geometry(mesh_frame, False)
 
 def main():
     global CALCULATE_BBOX
@@ -229,7 +242,7 @@ def main():
     sample = nusc.get("sample", scene["first_sample_token"])
     pose = nusc_can.get_messages(scene["name"], 'pose')
     pose_dataset = TimestmapData(pose, [p["utime"] for p in pose])
-    car_ego = CarEgo()
+    car_ego = CarPositionTimestamp()
     point_cloud_timeseries = PointCloudTimeseries()
 
     draw_lidar_data(vis, nusc, sample, colourmap, static_object_ids, car_ego, pose_dataset, point_cloud_timeseries) 
