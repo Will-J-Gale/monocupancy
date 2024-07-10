@@ -2,6 +2,7 @@ import os
 from math import sin, cos, radians
 
 import open3d as o3d
+from open3d.geometry import get_rotation_matrix_from_xyz
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -131,11 +132,10 @@ def create_lidar_geometries(pcd_path, label_path, colourmap, static_object_ids):
 
     return static_lidar_geometry, dynamic_lidar_geometry
 
-def generate_boxes(boxes, car_position, car_rotation):
+def generate_boxes(boxes, car_global_position, car_rotation):
     box_geometries = []
     for box in boxes:
-        box.translate(-np.array(car_position))
-        box.rotate(Quaternion(car_rotation))
+        box.translate(-np.array(car_global_position))
         w, l, h = box.wlh
         x, y, z = box.center
 
@@ -198,21 +198,30 @@ def draw_lidar_data(
     pos = car_ego.position.copy()
     pos[0], pos[1] = rotate_2d_vector(pos[0], pos[1], radians(-90)) #No idea why it needs rotating -90 degrees, maybe because car forward is actually X not Y?
     static_lidar_geometry.rotate(car_rotation.rotation_matrix, [0,0,0])
-    static_lidar_geometry.translate(pos, relative=False)
-    # static_lidar_geometry.translate(-lidar_origin, relative=True)
+    static_lidar_geometry.translate(lidar_origin, relative=True)
+    static_lidar_geometry.translate(pos, relative=True)
     dynamic_lidar_geometry.rotate(car_rotation.rotation_matrix, [0,0,0])
-    dynamic_lidar_geometry.translate(pos, relative=False) 
-    # dynamic_lidar_geometry.translate(-lidar_origin, relative=True)
+    dynamic_lidar_geometry.translate(lidar_origin, relative=True)
+    dynamic_lidar_geometry.translate(pos, relative=True) 
 
     point_cloud_timeseries.add_geometry(static_lidar_geometry)
 
     for geometry in point_cloud_timeseries.geometries:
         vis.add_geometry(geometry, CALCULATE_BBOX)
-    
+
+    vis.add_geometry(static_lidar_geometry, CALCULATE_BBOX)
     vis.add_geometry(dynamic_lidar_geometry, CALCULATE_BBOX)
 
-    mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=2, origin=pos)
+    mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=10, origin=pos)
     vis.add_geometry(mesh_frame, False)
+
+    boxes = generate_boxes(boxes, ego["translation"], car_rotation)
+    for box in boxes:
+        R = get_rotation_matrix_from_xyz([0, 0, radians(90)])
+        box.rotate(R, [0, 0, 0])
+        # box.rotate(car_rotation.rotation_matrix, [0, 0, 0])
+        box.translate(pos, relative=True)
+        vis.add_geometry(box, False)
 
 def main():
     global CALCULATE_BBOX
