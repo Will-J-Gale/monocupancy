@@ -1,6 +1,8 @@
 import os
 from math import sin, cos, radians
+from argparse import ArgumentParser
 
+import cv2
 import open3d as o3d
 from open3d.geometry import get_rotation_matrix_from_xyz
 import numpy as np
@@ -10,6 +12,12 @@ from nuscenes import NuScenes
 from nuscenes.can_bus.can_bus_api import NuScenesCanBus
 from pyquaternion import Quaternion
 from python_input import Input
+
+parser = ArgumentParser()
+parser.add_argument("--dataset_root", default="/media/storage/datasets/nuscenes-v1.0-mini")
+parser.add_argument("--voxel_size", type=float, default=0.5)
+parser.add_argument("--show_pointcloud", action='store_true')
+parser.add_argument("--show_image", action='store_true')
 
 CAM_IMAGE_WIDTH = 1600
 CAM_IMAGE_HEIGHT = 900
@@ -136,7 +144,7 @@ def create_lidar_geometries(pcd_path, label_path, colourmap, static_object_ids):
 
     return static_lidar_geometry, dynamic_lidar_geometry
 
-def generate_boxes(boxes, car_global_position, car_rotation):
+def generate_boxes(boxes, car_global_position):
     box_geometries = []
     for box in boxes:
         box.translate(-np.array(car_global_position))
@@ -175,7 +183,9 @@ def draw_lidar_data(
         static_object_ids:list, 
         car_ego:CarPositionTimestamp, 
         pose_dataset:TimestmapData, 
-        point_cloud_timeseries:PointCloudTimeseries):
+        point_cloud_timeseries:PointCloudTimeseries,
+        voxel_size:float=0.5,
+        show_pointcloud:bool=False):
     global CALCULATE_BBOX
     lidar_token = sample['data']['LIDAR_TOP']
     lidar = nusc.get('sample_data', lidar_token)
@@ -210,26 +220,45 @@ def draw_lidar_data(
 
     point_cloud_timeseries.add_geometry(static_lidar_geometry)
 
-    # vis.add_geometry(point_cloud_timeseries.combined_geometry, CALCULATE_BBOX)
-    # vis.add_geometry(dynamic_lidar_geometry, CALCULATE_BBOX)
 
     mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=10)
     mesh_frame.rotate(car_rotation.rotation_matrix, [0,0,0])
     mesh_frame.translate(pos, relative=False)
     vis.add_geometry(mesh_frame, False)
 
-    boxes = generate_boxes(boxes, ego["translation"], car_rotation)
+    boxes = generate_boxes(boxes, ego["translation"])
     for box in boxes:
-        R = get_rotation_matrix_from_xyz([0, 0, radians(90)])
+        R = get_rotation_matrix_from_xyz([0, 0, radians(90)]) #Again, not sure why it needs rotating 90 degrees
         box.rotate(R, [0, 0, 0])
-        # box.rotate(car_rotation.rotation_matrix, [0, 0, 0])
         box.translate(pos, relative=True)
         vis.add_geometry(box, False)
     
-    downpcd = point_cloud_timeseries.combined_geometry.voxel_down_sample(voxel_size=0.5)
-    vis.add_geometry(downpcd, CALCULATE_BBOX)
+    if(show_pointcloud):
+        vis.add_geometry(point_cloud_timeseries.combined_geometry, CALCULATE_BBOX)
+        vis.add_geometry(dynamic_lidar_geometry, CALCULATE_BBOX)
+    else:
+        static_lidar_voxel = o3d.geometry.VoxelGrid.create_from_point_cloud(point_cloud_timeseries.combined_geometry, voxel_size=voxel_size)
+        dynamic_lidar_voxel = o3d.geometry.VoxelGrid.create_from_point_cloud(dynamic_lidar_geometry, voxel_size=0.5)
+        vis.add_geometry(static_lidar_voxel, CALCULATE_BBOX)
+        vis.add_geometry(dynamic_lidar_voxel, CALCULATE_BBOX)
 
-def main():
+    fx = cam_front_extrinsics["camera_intrinsic"][0][0]
+    fy = cam_front_extrinsics["camera_intrinsic"][1][1]
+
+    cam_hfov = 2 * np.arctan2(CAM_IMAGE_WIDTH, 2 * fx)
+    cam_vfov = 2 * np.arctan2(CAM_IMAGE_HEIGHT, 2 * fy)
+
+    camera_pos = np.array(cam_front_extrinsics["translation"]) + pos
+    frustum = create_frustum_geometry(
+        camera_pos,
+        car_rotation.rotation_matrix,
+        cam_hfov,
+        cam_vfov,
+        100
+    )
+    vis.add_geometry(frustum, False)
+    
+def main(args):
     global CALCULATE_BBOX
 
     inp = Input()
@@ -243,8 +272,8 @@ def main():
     opt.show_coordinate_frame = True
 
     #Load nuscenes data
-    nusc = NuScenes(version='v1.0-mini', dataroot='/media/storage/datasets/nuscenes-v1.0-mini', verbose=False)
-    nusc_can = NuScenesCanBus(dataroot='/media/storage/datasets/nuscenes-v1.0-mini')
+    nusc = NuScenes(version='v1.0-mini', dataroot=args.dataset_root, verbose=False)
+    nusc_can = NuScenesCanBus(dataroot=args.dataset_root)
     colourmap = {}
 
     static_object_ids = [ 0, 13, 24, 25, 26, 27, 28, 29, 30 ]
@@ -260,9 +289,9 @@ def main():
     car_ego = CarPositionTimestamp()
     point_cloud_timeseries = PointCloudTimeseries()
 
-    draw_lidar_data(vis, nusc, sample, colourmap, static_object_ids, car_ego, pose_dataset, point_cloud_timeseries) 
+    draw_lidar_data(vis, nusc, sample, colourmap, static_object_ids, car_ego, pose_dataset, point_cloud_timeseries, args.voxel_size, args.show_pointcloud) 
+    image = cv2.imread(os.path.join(args.dataset_root, nusc.get('sample_data', sample['data']['CAM_FRONT'])["filename"]))
     CALCULATE_BBOX = False
-
 
     while(True):
         try:
@@ -275,7 +304,8 @@ def main():
 
                 vis.clear_geometries()
                 sample = nusc.get("sample", sample["next"]) 
-                draw_lidar_data(vis, nusc, sample, colourmap, static_object_ids, car_ego, pose_dataset, point_cloud_timeseries)
+                draw_lidar_data(vis, nusc, sample, colourmap, static_object_ids, car_ego, pose_dataset, point_cloud_timeseries, args.voxel_size, args.show_pointcloud)
+                image = cv2.imread(os.path.join(args.dataset_root, nusc.get('sample_data', sample['data']['CAM_FRONT'])["filename"]))
             
             if(inp.get_key_down("a")):
                 if(sample["prev"] == str()):
@@ -283,10 +313,17 @@ def main():
 
                 vis.clear_geometries()
                 sample = nusc.get("sample", sample["prev"]) 
-                draw_lidar_data(vis, nusc, sample, colourmap, static_object_ids, car_ego, pose_dataset, point_cloud_timeseries)
+                draw_lidar_data(vis, nusc, sample, colourmap, static_object_ids, car_ego, pose_dataset, point_cloud_timeseries, args.voxel_size, args.show_pointcloud)
+                image = cv2.imread(os.path.join(args.dataset_root, nusc.get('sample_data', sample['data']['CAM_FRONT'])["filename"]))
             
             vis.update_renderer()
+
+            if(args.show_image):
+                cv2.imshow("Image", image)
+                cv2.waitKey(1)
+
         except KeyboardInterrupt:
             break
 if __name__ == "__main__":
-    main()
+    args = parser.parse_args()
+    main(args)
