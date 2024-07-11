@@ -34,10 +34,14 @@ class CarPositionTimestamp:
 
 class PointCloudTimeseries:
     def __init__(self):
-        self.geometries = []
+        self.combined_geometry = None
+        self.points = []
+        self.colours = []
+        self.combined_geometry = o3d.geometry.PointCloud()
     
     def add_geometry(self, lidar_geometry):
-        self.geometries.append(lidar_geometry)
+        self.combined_geometry.points.extend(o3d.utility.Vector3dVector(lidar_geometry.points))
+        self.combined_geometry.colors.extend(o3d.utility.Vector3dVector(lidar_geometry.colors))
 
 class TimestmapData:
     def __init__(self, data:list, timestamps:list):
@@ -60,7 +64,7 @@ def create_line(start, end, colour):
 
     line_set = o3d.geometry.LineSet(
         points=o3d.utility.Vector3dVector(points),
-        lines=o3d.utility.Vector2iVector(lines),
+        lines=o3d.utility.Vector2iVector(lines)
     )
 
     line_set.colors = o3d.utility.Vector3dVector([colour])
@@ -206,13 +210,12 @@ def draw_lidar_data(
 
     point_cloud_timeseries.add_geometry(static_lidar_geometry)
 
-    for geometry in point_cloud_timeseries.geometries:
-        vis.add_geometry(geometry, CALCULATE_BBOX)
+    # vis.add_geometry(point_cloud_timeseries.combined_geometry, CALCULATE_BBOX)
+    # vis.add_geometry(dynamic_lidar_geometry, CALCULATE_BBOX)
 
-    vis.add_geometry(static_lidar_geometry, CALCULATE_BBOX)
-    vis.add_geometry(dynamic_lidar_geometry, CALCULATE_BBOX)
-
-    mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=10, origin=pos)
+    mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=10)
+    mesh_frame.rotate(car_rotation.rotation_matrix, [0,0,0])
+    mesh_frame.translate(pos, relative=False)
     vis.add_geometry(mesh_frame, False)
 
     boxes = generate_boxes(boxes, ego["translation"], car_rotation)
@@ -222,6 +225,9 @@ def draw_lidar_data(
         # box.rotate(car_rotation.rotation_matrix, [0, 0, 0])
         box.translate(pos, relative=True)
         vis.add_geometry(box, False)
+    
+    downpcd = point_cloud_timeseries.combined_geometry.voxel_down_sample(voxel_size=0.5)
+    vis.add_geometry(downpcd, CALCULATE_BBOX)
 
 def main():
     global CALCULATE_BBOX
