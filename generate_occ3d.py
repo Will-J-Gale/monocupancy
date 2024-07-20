@@ -190,18 +190,36 @@ def generate_frustum_from_camera_extrinsics(cam_extrinsics, rotation):
     )
     return frustum
 
-def generate_camera_view_voxel_grid(point_cloud, car_position, car_rotation, x_scale, y_scale, z_scale):
+def generate_camera_view_voxel_grid(
+        point_cloud_list:list, 
+        car_position:np.array, 
+        car_rotation:np.array, 
+        box_meshes:list,
+        x_scale:float, 
+        y_scale:float, 
+        z_scale:float):
     half_y = y_scale / 2
     half_z = z_scale / 2
 
-    box_pos = car_position + np.array([0, half_y, half_z])
-    box = o3d.geometry.OrientedBoundingBox(box_pos, np.eye(3), (x_scale, y_scale, z_scale))
-    box.rotate(car_rotation, car_position)
-    box.color = (1.0, 1.0, 0.0)
+    occupancy_box_pos = car_position + np.array([0, half_y, half_z])
+    occupancy_box = o3d.geometry.OrientedBoundingBox(occupancy_box_pos, np.eye(3), (x_scale, y_scale, z_scale))
+    occupancy_box.rotate(car_rotation, car_position)
+    occupancy_box.color = (1.0, 1.0, 0.0)
 
-    camera_voxel_grid = point_cloud.crop(box)
+    occupancy_cloud = o3d.geometry.PointCloud()
 
-    return camera_voxel_grid
+    for cloud in point_cloud_list:
+        cropped_points = cloud.crop(occupancy_box)
+        occupancy_cloud.points.extend(o3d.utility.Vector3dVector(cropped_points.points))
+        occupancy_cloud.colors.extend(o3d.utility.Vector3dVector(cropped_points.colors))
+    
+    for box in box_meshes:
+        box_cloud = box.sample_points_uniformly(number_of_points=1000)
+        box_cloud = box_cloud.crop(occupancy_box)
+        occupancy_cloud.points.extend(o3d.utility.Vector3dVector(box_cloud.points))
+        occupancy_cloud.colors.extend(o3d.utility.Vector3dVector(box_cloud.colors))
+
+    return occupancy_cloud, occupancy_box
 
 def draw_lidar_data(
         vis:o3d.visualization.Visualizer, 
@@ -252,8 +270,9 @@ def draw_lidar_data(
     mesh_frame.rotate(car_rotation.rotation_matrix, [0,0,0])
     mesh_frame.translate(pos, relative=False)
     vis.add_geometry(mesh_frame, False)
-
     boxes = generate_boxes(boxes, ego["translation"])
+    box_meshes = []
+
     for box in boxes:
         R = get_rotation_matrix_from_xyz([0, 0, radians(90)]) #Again, not sure why it needs rotating 90 degrees
         box.rotate(R, [0, 0, 0])
@@ -261,24 +280,23 @@ def draw_lidar_data(
 
         if(show_pointcloud):
             vis.add_geometry(box, False)
+        
+        # box_voxels = o3d.geometry.VoxelGrid.create_from_triangle_mesh(box, voxel_size)
+        # for voxel in box_voxels.get_voxels():
+        #     box_voxels.remove_voxel(voxel.grid_index)
+        #     voxel.color = [1.0, 0.0, 0.0]
+        #     box_voxels.add_voxel(voxel)
 
-        else:
-            box_voxels = o3d.geometry.VoxelGrid.create_from_triangle_mesh(box, voxel_size)
-            for voxel in box_voxels.get_voxels():
-                box_voxels.remove_voxel(voxel.grid_index)
-                voxel.color = [1.0, 0.0, 0.0]
-                box_voxels.add_voxel(voxel)
-
-            vis.add_geometry(box_voxels, False)
-
+        # vis.add_geometry(box_voxels, False)
+        
     if(show_pointcloud):
         vis.add_geometry(point_cloud_timeseries.combined_geometry, CALCULATE_BBOX)
         vis.add_geometry(dynamic_lidar_geometry, CALCULATE_BBOX)
-    else:
-        static_lidar_voxel = o3d.geometry.VoxelGrid.create_from_point_cloud(point_cloud_timeseries.combined_geometry, voxel_size=voxel_size)
-        dynamic_lidar_voxel = o3d.geometry.VoxelGrid.create_from_point_cloud(dynamic_lidar_geometry, voxel_size=0.5)
-        vis.add_geometry(static_lidar_voxel, CALCULATE_BBOX)
-        vis.add_geometry(dynamic_lidar_voxel, CALCULATE_BBOX)
+    # else:
+    #     static_lidar_voxel = o3d.geometry.VoxelGrid.create_from_point_cloud(point_cloud_timeseries.combined_geometry, voxel_size=voxel_size)
+    #     dynamic_lidar_voxel = o3d.geometry.VoxelGrid.create_from_point_cloud(dynamic_lidar_geometry, voxel_size=0.5)
+    #     vis.add_geometry(static_lidar_voxel, CALCULATE_BBOX)
+    #     vis.add_geometry(dynamic_lidar_voxel, CALCULATE_BBOX) 
 
     fx = cam_front_extrinsics["camera_intrinsic"][0][0]
     fy = cam_front_extrinsics["camera_intrinsic"][1][1]
@@ -298,20 +316,24 @@ def draw_lidar_data(
 
     camera_occupancy_grid_pos = camera_pos.copy()
     camera_occupancy_grid_pos[2] = 0
-    occupancy_grid_pointcloud = generate_camera_view_voxel_grid(
-        point_cloud_timeseries.combined_geometry, 
+    occupancy_grid_pointcloud, occupancy_bounding_box = generate_camera_view_voxel_grid(
+        [point_cloud_timeseries.combined_geometry, dynamic_lidar_geometry], 
         camera_occupancy_grid_pos, 
         car_rotation.rotation_matrix, 
+        boxes,
         35, 
         35, 
         10
     )
+    vis.add_geometry(occupancy_bounding_box, CALCULATE_BBOX)
+    # vis.add_geometry(occupancy_grid_pointcloud, CALCULATE_BBOX)
+
     occupancy_grid_pointcloud.translate([-200, 0, 0], False)
     occupancy_grid_pointcloud.rotate(car_rotation.inverse.rotation_matrix)
-    # vis.add_geometry(occupancy_grid_pointcloud, CALCULATE_BBOX)
 
     occupancy_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(occupancy_grid_pointcloud, voxel_size=voxel_size)
     vis.add_geometry(occupancy_grid, CALCULATE_BBOX)
+    # vis.add_geometry(occupancy_grid_pointcloud, CALCULATE_BBOX)
     
 def main(args):
     global CALCULATE_BBOX
