@@ -1,28 +1,34 @@
 import os
+import time
 from math import sin, cos, radians
 from argparse import ArgumentParser
 
 import cv2
+import numpy as np
 import open3d as o3d
 from open3d.geometry import get_rotation_matrix_from_xyz
-import numpy as np
-import matplotlib.pyplot as plt
-
 from nuscenes import NuScenes
 from nuscenes.can_bus.can_bus_api import NuScenesCanBus
 from pyquaternion import Quaternion
 from python_input import Input
 
+from visualisation import Visualizer
+
 parser = ArgumentParser()
 parser.add_argument("--dataset_root", default="/media/storage/datasets/nuscenes-v1.0-mini")
-parser.add_argument("--voxel_size", type=float, default=0.5)
+parser.add_argument("--voxel_size", type=float, default=0.30)
 parser.add_argument("--show_image", action='store_true')
 
 CAM_IMAGE_WIDTH = 1600
 CAM_IMAGE_HEIGHT = 900
-CALCULATE_BBOX = True #Stupid hack to keep camera in same place, god o3d has a weird userspace...
+NUM_BOX_CLOUD_POINTS = 1000
 
-class CarPositionTimestamp:
+class Transform:
+    def __init__(self, position, rotation):
+        self.position = position
+        self.rotation = rotation
+
+class CarTrajectory:
     def __init__(self):
         self.position = np.array([0.0, 0.0, 0], dtype=np.float64)
         self.rotation = np.array([0, 0, 0, 0], dtype=np.float64)
@@ -38,17 +44,6 @@ class CarPositionTimestamp:
             self.position += self.velocity
 
         self.prev_car_ego = pose
-
-class PointCloudTimeseries:
-    def __init__(self):
-        self.combined_geometry = None
-        self.points = []
-        self.colours = []
-        self.combined_geometry = o3d.geometry.PointCloud()
-    
-    def add_geometry(self, lidar_geometry):
-        self.combined_geometry.points.extend(o3d.utility.Vector3dVector(lidar_geometry.points))
-        self.combined_geometry.colors.extend(o3d.utility.Vector3dVector(lidar_geometry.colors))
 
 class TimestmapData:
     def __init__(self, data:list, timestamps:list):
@@ -77,6 +72,7 @@ def create_line(start, end, colour):
     line_set.colors = o3d.utility.Vector3dVector([colour])
 
     return line_set
+    
 
 def create_frustum_geometry(position, rotation, hfov_radians, vfov_radians, distance):
     hfov_half = hfov_radians / 2
@@ -143,19 +139,18 @@ def create_lidar_geometries(pcd_path, label_path, colourmap, static_object_ids):
 
     return static_lidar_geometry, dynamic_lidar_geometry
 
-def generate_boxes(boxes, car_global_position, car_relative_position):
-    box_meshes = []
+def generate_box_pointclouds(box_detections, car_global_position, car_relative_position):
+    box_clouds = []
     
-    for box in boxes:
+    for box in box_detections:
         box.translate(-np.array(car_global_position))
         w, l, h = box.wlh
         x, y, z = box.center
 
-
         # #TriangleMesh - BOTTOM LEFT ANCHOR...
         bbox_mesh = o3d.geometry.TriangleMesh.create_box(width=l, height=w, depth=h)
         bbox_mesh.compute_vertex_normals()
-        bbox_mesh.paint_uniform_color([1.0, 0.1, 0.0])
+        bbox_mesh.paint_uniform_color([1.0, 0.0, 0.0])
 
         x -= l/2
         y -= w/2
@@ -168,12 +163,12 @@ def generate_boxes(boxes, car_global_position, car_relative_position):
         bbox_mesh.rotate(R, [0, 0, 0])
         bbox_mesh.translate(car_relative_position, relative=True)
 
-        box_meshes.append(bbox_mesh)
+        box_cloud = bbox_mesh.sample_points_uniformly(number_of_points=NUM_BOX_CLOUD_POINTS)
+        box_clouds.append(box_cloud)
 
-    return box_meshes
+    return box_clouds
 
 def generate_frustum_from_camera_extrinsics(cam_extrinsics, rotation):
-    # Create frustum
     fx = cam_extrinsics["camera_intrinsic"][0][0]
     fy = cam_extrinsics["camera_intrinsic"][1][1]
 
@@ -189,146 +184,132 @@ def generate_frustum_from_camera_extrinsics(cam_extrinsics, rotation):
     )
     return frustum
 
-def generate_camera_view_voxel_grid(
-        point_cloud_list:list, 
-        car_position:np.array, 
-        car_rotation:np.array, 
-        box_meshes:list,
+def generate_camera_view_occupancy(
+        dense_pointcloud:o3d.geometry.PointCloud, 
+        car_transform:Transform,
         x_scale:float, 
         y_scale:float, 
-        z_scale:float):
+        z_scale:float,
+        voxel_size:float):
+
     half_y = y_scale / 2
     half_z = z_scale / 2
 
-    occupancy_box_pos = car_position + np.array([0, half_y, half_z])
+    occupancy_box_pos = car_transform.position + np.array([0, half_y, half_z])
     occupancy_box = o3d.geometry.OrientedBoundingBox(occupancy_box_pos, np.eye(3), (x_scale, y_scale, z_scale))
-    occupancy_box.rotate(car_rotation, car_position)
+    occupancy_box.rotate(car_transform.rotation.rotation_matrix, car_transform.position)
     occupancy_box.color = (1.0, 1.0, 0.0)
 
     occupancy_cloud = o3d.geometry.PointCloud()
 
-    for cloud in point_cloud_list:
-        cropped_points = cloud.crop(occupancy_box)
-        occupancy_cloud.points.extend(o3d.utility.Vector3dVector(cropped_points.points))
-        occupancy_cloud.colors.extend(o3d.utility.Vector3dVector(cropped_points.colors))
-        # occupancy_cloud.colors.extend(np.ones_like(cropped_points.colors) * 255)
+    cropped_points = dense_pointcloud.crop(occupancy_box)
+    occupancy_cloud.points.extend(o3d.utility.Vector3dVector(cropped_points.points))
+    occupancy_cloud.colors.extend(o3d.utility.Vector3dVector(cropped_points.colors))
+    occupancy_cloud.translate([0, 0, 0], False)
+    occupancy_cloud.rotate(car_transform.rotation.inverse.rotation_matrix)
     
-    for box in box_meshes:
-        box_cloud = box.sample_points_uniformly(number_of_points=1000)
-        box_cloud = box_cloud.crop(occupancy_box)
-        occupancy_cloud.points.extend(o3d.utility.Vector3dVector(box_cloud.points))
-        occupancy_cloud.colors.extend(o3d.utility.Vector3dVector(box_cloud.colors))
-        # occupancy_cloud.colors.extend(np.ones_like(cropped_points.colors) * 100)
+    return o3d.geometry.VoxelGrid.create_from_point_cloud(occupancy_cloud, voxel_size=voxel_size)
 
-    return occupancy_cloud, occupancy_box
 
-def draw_lidar_data(
-        vis:o3d.visualization.Visualizer, 
-        nusc, 
-        sample:dict, 
-        colourmap:dict, 
-        static_object_ids:list, 
-        car_ego:CarPositionTimestamp, 
-        pose_dataset:TimestmapData, 
-        point_cloud_timeseries:PointCloudTimeseries,
-        voxel_size:float=0.5):
-    global CALCULATE_BBOX
-    lidar_token = sample['data']['LIDAR_TOP']
-    lidar = nusc.get('sample_data', lidar_token)
-    cam_front = nusc.get('sample_data', sample['data']['CAM_FRONT'])
-    cam_front_extrinsics = nusc.get('calibrated_sensor', cam_front['calibrated_sensor_token'])
-    lidar_extrinsics = nusc.get('calibrated_sensor', lidar['calibrated_sensor_token'])
-    lidar_origin = np.array(lidar_extrinsics['translation'])
-    boxes = nusc.get_boxes(lidar_token)
-    pcd_path = nusc.get_sample_data_path(lidar_token)
-    pcd_labels_path = os.path.join('/media/storage/datasets/nuscenes-v1.0-mini/lidarseg/v1.0-mini', lidar_token + '_lidarseg.bin')
-    ego = nusc.get("ego_pose", lidar_token)
-    car_rotation = Quaternion(ego["rotation"])
 
-    pose = pose_dataset.get_data_at_timestamp(lidar["timestamp"])
-    car_ego.update(pose)
+class DenseLidarGenerator:
+    def __init__(
+            self, 
+            nusc, 
+            nusc_can, 
+            scene:dict, 
+            num_adjacent_samples:int,
+            colourmap:dict,
+            static_object_ids:list):
+        self.nusc = nusc
+        self.nusc_can = nusc_can
+        self.scene = scene
+        self.num_adjacent_samples = num_adjacent_samples
+        self.colourmap = colourmap
+        self.static_object_ids = static_object_ids
+        self.total_samples = scene["nbr_samples"]
+        self.samples = []
+        self.load_samples()
 
-    static_lidar_geometry, dynamic_lidar_geometry = create_lidar_geometries(
-        pcd_path, 
-        pcd_labels_path, 
-        colourmap, 
-        static_object_ids
-    )
-
-    pos = car_ego.position.copy()
-    pos[0], pos[1] = rotate_2d_vector(pos[0], pos[1], radians(-90)) #No idea why it needs rotating -90 degrees, maybe because car forward is actually X not Y?
-    static_lidar_geometry.rotate(car_rotation.rotation_matrix, [0,0,0])
-    static_lidar_geometry.translate(lidar_origin, relative=True)
-    static_lidar_geometry.translate(pos, relative=True)
-    dynamic_lidar_geometry.rotate(car_rotation.rotation_matrix, [0,0,0])
-    dynamic_lidar_geometry.translate(lidar_origin, relative=True)
-    dynamic_lidar_geometry.translate(pos, relative=True) 
+        pose = nusc_can.get_messages(scene["name"], 'pose')
+        self.pose_dataset = TimestmapData(pose, [p["utime"] for p in pose])
     
-    point_cloud_timeseries.add_geometry(static_lidar_geometry)    
+    def load_samples(self):
+        sample = self.nusc.get("sample", self.scene["first_sample_token"])
+        self.samples.append(sample)
 
-    boxes = generate_boxes(boxes, ego["translation"], pos)
-    for box in boxes:
-        vis.add_geometry(box, False)
+        while(sample["next"] != str()):
+            sample = self.nusc.get("sample", sample["next"])
+            self.samples.append(sample)
 
-    vis.add_geometry(point_cloud_timeseries.combined_geometry, CALCULATE_BBOX)
-    vis.add_geometry(dynamic_lidar_geometry, CALCULATE_BBOX)
+    def get(self, index):
+        car_trajectory = CarTrajectory()
+        dense_lidar = o3d.geometry.PointCloud()
+        
+        start = index - self.num_adjacent_samples
+        end = index + self.num_adjacent_samples
 
-    fx = cam_front_extrinsics["camera_intrinsic"][0][0]
-    fy = cam_front_extrinsics["camera_intrinsic"][1][1]
+        if(start < 0 or end >= len(self.samples)):
+            raise Exception(f"Index {index} out of range")
 
-    cam_hfov = 2 * np.arctan2(CAM_IMAGE_WIDTH, 2 * fx)
-    cam_vfov = 2 * np.arctan2(CAM_IMAGE_HEIGHT, 2 * fy)
+        current_sample = self.samples[index]
+        current_car_transform = None
 
-    camera_pos = np.array(cam_front_extrinsics["translation"]) + pos
-    frustum = create_frustum_geometry(
-        camera_pos,
-        car_rotation.rotation_matrix,
-        cam_hfov,
-        cam_vfov,
-        100
-    )
-    vis.add_geometry(frustum, False)
+        for i in range(start, end):
+            #This part can be parallelised and takes the most time (0.17s per sample)
+            sample = self.samples[i]
+            lidar_token = sample['data']['LIDAR_TOP']
+            lidar = self.nusc.get('sample_data', lidar_token)
+            cam_front = self.nusc.get('sample_data', sample['data']['CAM_FRONT'])
+            cam_front_extrinsics = self.nusc.get('calibrated_sensor', cam_front['calibrated_sensor_token'])
+            lidar_extrinsics = self.nusc.get('calibrated_sensor', lidar['calibrated_sensor_token'])
+            lidar_origin = np.array(lidar_extrinsics['translation'])
+            box_detections = self.nusc.get_boxes(lidar_token)
+            pcd_path = self.nusc.get_sample_data_path(lidar_token)
+            pcd_labels_path = os.path.join('/media/storage/datasets/nuscenes-v1.0-mini/lidarseg/v1.0-mini', lidar_token + '_lidarseg.bin')
+            ego = self.nusc.get("ego_pose", lidar_token)
+            car_world_position = ego["translation"]
+            car_rotation = Quaternion(ego["rotation"])
+            can_pose_at_timestamp = self.pose_dataset.get_data_at_timestamp(lidar["timestamp"])
 
-    ##Generate occupancy
-    camera_occupancy_grid_pos = camera_pos.copy()
-    camera_occupancy_grid_pos[2] = 0
-    occupancy_grid_pointcloud, occupancy_bounding_box = generate_camera_view_voxel_grid(
-        [point_cloud_timeseries.combined_geometry, dynamic_lidar_geometry], 
-        camera_occupancy_grid_pos, 
-        car_rotation.rotation_matrix, 
-        boxes,
-        35, 
-        35, 
-        10
-    )
-    vis.add_geometry(occupancy_bounding_box, CALCULATE_BBOX)
-    # vis.add_geometry(occupancy_grid_pointcloud, CALCULATE_BBOX)
+            static_lidar_geometry, dynamic_lidar_geometry = create_lidar_geometries(
+                pcd_path, 
+                pcd_labels_path, 
+                self.colourmap, 
+                self.static_object_ids
+            )
 
-    occupancy_grid_pointcloud.translate([-200, 0, 0], False)
-    occupancy_grid_pointcloud.rotate(car_rotation.inverse.rotation_matrix)
+            #This part cannot be parallelised as it needs all above data but it's super fast (0.0008s per sample)
+            car_trajectory.update(can_pose_at_timestamp)
 
-    occupancy_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(occupancy_grid_pointcloud, voxel_size=voxel_size)
-    vis.add_geometry(occupancy_grid, CALCULATE_BBOX)
-    # vis.add_geometry(occupancy_grid_pointcloud, CALCULATE_BBOX)
+            car_local_position = car_trajectory.position.copy()
+            car_local_position[0], car_local_position[1] = rotate_2d_vector(car_local_position[0], car_local_position[1], radians(-90)) #No idea why it needs rotating -90 degrees, maybe because car forward is actually X not Y?
+            static_lidar_geometry.rotate(car_rotation.rotation_matrix, [0,0,0])
+            static_lidar_geometry.translate(lidar_origin, relative=True)
+            static_lidar_geometry.translate(car_local_position, relative=True)
+            
+            if(sample == current_sample):
+                current_car_transform = Transform(car_local_position, car_rotation)
+                dynamic_lidar_geometry.rotate(car_rotation.rotation_matrix, [0,0,0])
+                dynamic_lidar_geometry.translate(lidar_origin, relative=True)
+                dynamic_lidar_geometry.translate(car_local_position, relative=True) 
+                dense_lidar.points.extend(o3d.utility.Vector3dVector(dynamic_lidar_geometry.points))
+                dense_lidar.colors.extend(o3d.utility.Vector3dVector(dynamic_lidar_geometry.colors))
 
-    #DEBUG
-    mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=10, origin=[0, 0, 0])
-    mesh_frame.rotate(car_rotation.rotation_matrix, [0,0,0])
-    mesh_frame.translate(pos)
-    vis.add_geometry(mesh_frame, False)
+                for box_cloud in  generate_box_pointclouds(box_detections, car_world_position, car_local_position):
+                    dense_lidar.points.extend(box_cloud.points)
+                    dense_lidar.colors.extend(box_cloud.colors)
+
+            dense_lidar.points.extend(o3d.utility.Vector3dVector(static_lidar_geometry.points))
+            dense_lidar.colors.extend(o3d.utility.Vector3dVector(static_lidar_geometry.colors))
+
+        return dense_lidar, current_car_transform
     
 def main(args):
-    global CALCULATE_BBOX
-
     inp = Input()
 
     #Create window visualizer
-    vis = o3d.visualization.Visualizer()
-    vis.create_window()
-    opt = vis.get_render_option()
-
-    opt.background_color = np.asarray([0, 0, 0])
-    opt.show_coordinate_frame = True
+    vis = Visualizer()
 
     #Load nuscenes data
     nusc = NuScenes(version='v1.0-mini', dataroot=args.dataset_root, verbose=False)
@@ -341,16 +322,21 @@ def main(args):
         colour = nusc.colormap[name]
         colourmap[index] = colour
     
-    scene = nusc.scene[0]
-    sample = nusc.get("sample", scene["first_sample_token"])
-    pose = nusc_can.get_messages(scene["name"], 'pose')
-    pose_dataset = TimestmapData(pose, [p["utime"] for p in pose])
-    car_ego = CarPositionTimestamp()
-    point_cloud_timeseries = PointCloudTimeseries()
+    num_adjacent_samples = 10
 
-    draw_lidar_data(vis, nusc, sample, colourmap, static_object_ids, car_ego, pose_dataset, point_cloud_timeseries, args.voxel_size) 
-    image = cv2.imread(os.path.join(args.dataset_root, nusc.get('sample_data', sample['data']['CAM_FRONT'])["filename"]))
-    CALCULATE_BBOX = False
+    lidar_generator = DenseLidarGenerator(
+        nusc,
+        nusc_can,
+        nusc.scene[0],
+        num_adjacent_samples,
+        colourmap,
+        static_object_ids
+    )
+
+    index = num_adjacent_samples
+    dense_lidar, car_transform = lidar_generator.get(index)
+    occupancy = generate_camera_view_occupancy(dense_lidar, car_transform, 35, 35, 10, args.voxel_size)
+    vis.add_lidar(dense_lidar, occupancy)
 
     while(True):
         try:
@@ -358,31 +344,20 @@ def main(args):
                 break
 
             if(inp.get_key_down("space")):
-                if(sample["next"] == str()):
-                    continue
+                index += 1
+                dense_lidar, car_transform = lidar_generator.get(index)
+                occupancy = generate_camera_view_occupancy(dense_lidar, car_transform, 35, 35, 10, args.voxel_size)
+                vis.reset()
+                vis.add_lidar(dense_lidar, occupancy)
 
-                sample = nusc.get("sample", sample["next"]) 
-                vis.clear_geometries()
-                draw_lidar_data(vis, nusc, sample, colourmap, static_object_ids, car_ego, pose_dataset, point_cloud_timeseries, args.voxel_size)
-                image = cv2.imread(os.path.join(args.dataset_root, nusc.get('sample_data', sample['data']['CAM_FRONT'])["filename"]))
-            
             if(inp.get_key_down("a")):
-                if(sample["prev"] == str()):
-                    continue
-
-                sample = nusc.get("sample", sample["prev"]) 
-                vis.clear_geometries()
-                draw_lidar_data(vis, nusc, sample, colourmap, static_object_ids, car_ego, pose_dataset, point_cloud_timeseries)
-                image = cv2.imread(os.path.join(args.dataset_root, nusc.get('sample_data', sample['data']['CAM_FRONT'])["filename"]))
+                pass
             
-            vis.update_renderer()
-
-            if(args.show_image):
-                cv2.imshow("Image", image)
-                cv2.waitKey(1)
+            vis.render()
 
         except KeyboardInterrupt:
             break
+
 if __name__ == "__main__":
     args = parser.parse_args()
     main(args)
