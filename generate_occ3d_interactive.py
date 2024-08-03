@@ -16,6 +16,7 @@ parser.add_argument("--dataset_root", default="/media/storage/datasets/nuscenes-
 parser.add_argument("--voxel_size", type=float, default=0.5)
 parser.add_argument("--scene_index", type=int, default=0)
 parser.add_argument("--show_image", action='store_true')
+parser.add_argument("--dataset_version", default="v1.0-mini")
 
 CAM_IMAGE_WIDTH = 1600
 CAM_IMAGE_HEIGHT = 900
@@ -240,7 +241,7 @@ def draw_lidar_data(
     lidar_origin = np.array(lidar_extrinsics['translation'])
     box_detections = nusc.get_boxes(lidar_token)
     pcd_path = nusc.get_sample_data_path(lidar_token)
-    pcd_labels_path = os.path.join('/media/storage/datasets/nuscenes-v1.0-mini/lidarseg/v1.0-mini', lidar_token + '_lidarseg.bin')
+    pcd_labels_path = os.path.join(nusc.dataroot, f"lidarseg/{nusc.version}", lidar_token + '_lidarseg.bin')
     ego = nusc.get("ego_pose", lidar_token)
     car_rotation = Quaternion(ego["rotation"])
 
@@ -319,17 +320,8 @@ def main(args):
 
     inp = Input()
 
-    #Create window visualizer
-    point_cloud_window = o3d.visualization.Visualizer()
-    occupancy_window = o3d.visualization.Visualizer()
-    point_cloud_window.create_window("Point cloud", 1920, 1080, 0, 0)
-    occupancy_window.create_window("Occupancy", 500, 500, 1920, 0)
-
-    point_cloud_window.get_render_option().background_color = np.asarray([0, 0, 0])
-    occupancy_window.get_render_option().background_color = np.asarray([0, 0, 0])
-
     #Load nuscenes data
-    nusc = NuScenes(version='v1.0-mini', dataroot=args.dataset_root, verbose=False)
+    nusc = NuScenes(version=args.dataset_version, dataroot=args.dataset_root, verbose=False)
     nusc_can = NuScenesCanBus(dataroot=args.dataset_root)
     colourmap = {}
 
@@ -345,6 +337,15 @@ def main(args):
     pose_dataset = TimestmapData(pose, [p["utime"] for p in pose])
     car_trajectory = CarTrajectory()
     point_cloud_timeseries = PointCloudTimeseries()
+
+    #Create window visualizer
+    point_cloud_window = o3d.visualization.Visualizer()
+    occupancy_window = o3d.visualization.Visualizer()
+    point_cloud_window.create_window("Point cloud", 1920, 1080, 0, 0)
+    occupancy_window.create_window("Occupancy", 500, 500, 1920, 0)
+
+    point_cloud_window.get_render_option().background_color = np.asarray([0, 0, 0])
+    occupancy_window.get_render_option().background_color = np.asarray([0, 0, 0])
 
     draw_lidar_data(point_cloud_window, occupancy_window, nusc, sample, colourmap, static_object_ids, car_trajectory, pose_dataset, point_cloud_timeseries, args.voxel_size) 
     image = cv2.imread(os.path.join(args.dataset_root, nusc.get('sample_data', sample['data']['CAM_FRONT'])["filename"]))

@@ -18,6 +18,7 @@ parser = ArgumentParser()
 parser.add_argument("--dataset_root", default="/media/storage/datasets/nuscenes-v1.0-mini")
 parser.add_argument("--voxel_size", type=float, default=0.30)
 parser.add_argument("--show_image", action='store_true')
+parser.add_argument("--dataset_version", default="v1.0-mini")
 
 CAM_IMAGE_WIDTH = 1600
 CAM_IMAGE_HEIGHT = 900
@@ -266,7 +267,7 @@ class DenseLidarGenerator:
             lidar_origin = np.array(lidar_extrinsics['translation'])
             box_detections = self.nusc.get_boxes(lidar_token)
             pcd_path = self.nusc.get_sample_data_path(lidar_token)
-            pcd_labels_path = os.path.join('/media/storage/datasets/nuscenes-v1.0-mini/lidarseg/v1.0-mini', lidar_token + '_lidarseg.bin')
+            pcd_labels_path = os.path.join(self.nusc.dataroot, f"lidarseg/{self.nusc.version}", lidar_token + '_lidarseg.bin')
             ego = self.nusc.get("ego_pose", lidar_token)
             car_world_position = ego["translation"]
             car_rotation = Quaternion(ego["rotation"])
@@ -308,11 +309,8 @@ class DenseLidarGenerator:
 def main(args):
     inp = Input()
 
-    #Create window visualizer
-    vis = Visualizer()
-
     #Load nuscenes data
-    nusc = NuScenes(version='v1.0-mini', dataroot=args.dataset_root, verbose=False)
+    nusc = NuScenes(version=args.dataset_version, dataroot=args.dataset_root, verbose=False)
     nusc_can = NuScenesCanBus(dataroot=args.dataset_root)
     colourmap = {}
 
@@ -336,6 +334,8 @@ def main(args):
     index = num_adjacent_samples
     dense_lidar, car_transform = lidar_generator.get(index)
     occupancy = generate_camera_view_occupancy(dense_lidar, car_transform, 35, 35, 10, args.voxel_size)
+    #Create window visualizer
+    vis = Visualizer()
     vis.add_lidar(dense_lidar, occupancy)
 
     while(True):
