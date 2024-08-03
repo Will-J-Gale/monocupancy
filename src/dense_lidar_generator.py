@@ -1,8 +1,7 @@
-import time
 import os
 from math import radians
 from typing import Tuple
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import open3d as o3d
@@ -48,7 +47,6 @@ class DenseLidarGenerator:
             self.samples.append(sample)
 
     def get(self, index:int) -> Tuple[o3d.geometry.PointCloud, Camera]:
-        process_start = time.time()
         car_trajectory = CarTrajectory()
         dense_lidar = o3d.geometry.PointCloud()
         
@@ -61,6 +59,7 @@ class DenseLidarGenerator:
         current_sample = self.samples[index]
         camera_transform = None
         camera_frustum = None
+        image_path = None
         loaded_lidar = []
         
         with ProcessPoolExecutor(max_workers=16) as executor:
@@ -106,6 +105,7 @@ class DenseLidarGenerator:
             static_lidar_geometry.translate(car_local_position, relative=True)
             
             if(sample == current_sample):
+                image_path = cam_front["filename"]
                 camera_pos = car_local_position + cam_front_extrinsics["translation"]
                 camera_pos[2] = car_local_position[2]
                 camera_transform = Transform(camera_pos, car_rotation)
@@ -125,9 +125,4 @@ class DenseLidarGenerator:
             dense_lidar.points.extend(o3d.utility.Vector3dVector(static_lidar_geometry.points))
             dense_lidar.colors.extend(o3d.utility.Vector3dVector(static_lidar_geometry.colors))
 
-        dt = time.time() - process_start
-        print(dt)
-        return dense_lidar, Camera(camera_transform, camera_frustum)
-    
-# Normal:   ~5s
-# Threaded: ???
+        return dense_lidar, Camera(camera_transform, camera_frustum, image_path)
