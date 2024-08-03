@@ -5,7 +5,6 @@ import open3d as o3d
 from open3d.geometry import get_rotation_matrix_from_xyz
 from pyquaternion import Quaternion
 
-
 class Transform:
     def __init__(self, position, rotation):
         self.position = position
@@ -138,7 +137,10 @@ def create_lidar_geometries(pcd_path, label_path, colourmap, static_object_ids):
     dynamic_points = []
     dynamic_labels = []
 
-    for label, point in zip(pcd_labels, point_cloud_raw):
+    for i in range(len(point_cloud_raw)):
+        point = point_cloud_raw[i]
+        label = pcd_labels[i]
+
         if(label in static_object_ids):
             static_points.append(point)
             static_labels.append(label)
@@ -149,15 +151,7 @@ def create_lidar_geometries(pcd_path, label_path, colourmap, static_object_ids):
     static_colours = [colourmap[label] for label in static_labels]
     dynamic_colours = [colourmap[label] for label in dynamic_labels]
 
-    static_lidar_geometry = o3d.geometry.PointCloud()
-    static_lidar_geometry.points = o3d.utility.Vector3dVector(static_points)
-    static_lidar_geometry.colors = o3d.utility.Vector3dVector(static_colours)
-
-    dynamic_lidar_geometry = o3d.geometry.PointCloud()
-    dynamic_lidar_geometry.points = o3d.utility.Vector3dVector(dynamic_points)
-    dynamic_lidar_geometry.colors = o3d.utility.Vector3dVector(dynamic_colours)
-
-    return static_lidar_geometry, dynamic_lidar_geometry
+    return dynamic_points, dynamic_colours, static_points, static_colours
 
 def generate_box_pointclouds(box_detections, car_global_position, car_relative_position, num_box_cloud_points=1000):
     box_clouds = []

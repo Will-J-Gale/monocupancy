@@ -20,7 +20,7 @@ NUM_BOX_CLOUD_POINTS = 2000
 OCCUPANCY_GRID_WIDTH = 35
 OCCUPANCY_GRID_DEPTH = 35
 OCCUPANCY_GRID_HEIGHT= 10
-NUM_ADJACENT_SAMPLES = 15
+NUM_FUTURE_SAMPLES = 15
 FRUSTUM_DISTANCE = 100
 
 def main(args):
@@ -38,14 +38,14 @@ def main(args):
         nusc,
         nusc_can,
         nusc.scene[args.scene_index],
-        NUM_ADJACENT_SAMPLES,
+        NUM_FUTURE_SAMPLES,
         colourmap,
         STATIC_OBJECT_IDS,
         NUM_BOX_CLOUD_POINTS,
         FRUSTUM_DISTANCE
     )
 
-    index = NUM_ADJACENT_SAMPLES
+    index = NUM_FUTURE_SAMPLES
     dense_lidar, camera = lidar_generator.get(index)
     frustum = Frustum(camera.frustum.points)
     occupancy, occupancy_box = generate_camera_view_occupancy(
@@ -56,7 +56,7 @@ def main(args):
         OCCUPANCY_GRID_HEIGHT, 
         args.voxel_size, frustum
     )
-
+    
     vis = Visualizer()
     vis.add_lidar(dense_lidar, occupancy)
     vis.add_pointcloud_geometry([occupancy_box, camera.frustum])
