@@ -15,17 +15,17 @@ parser.add_argument("--voxel_size", type=float, default=0.30)
 parser.add_argument("--show_image", action='store_true')
 parser.add_argument("--dataset_version", default="v1.0-mini")
 
-NUM_BOX_CLOUD_POINTS = 2000
 STATIC_OBJECT_IDS = [ 0, 13, 24, 25, 26, 27, 28, 29, 30 ]
+NUM_BOX_CLOUD_POINTS = 2000
 OCCUPANCY_GRID_WIDTH = 35
 OCCUPANCY_GRID_DEPTH = 35
 OCCUPANCY_GRID_HEIGHT= 10
 NUM_ADJACENT_SAMPLES = 15
+FRUSTUM_DISTANCE = 100
 
 def main(args):
     inp = Input()
 
-    #Load nuscenes data
     nusc = NuScenes(version=args.dataset_version, dataroot=args.dataset_root, verbose=False)
     nusc_can = NuScenesCanBus(dataroot=args.dataset_root)
     colourmap = {}
@@ -34,7 +34,6 @@ def main(args):
         colour = nusc.colormap[name]
         colourmap[index] = colour
     
-
     lidar_generator = DenseLidarGenerator(
         nusc,
         nusc_can,
@@ -42,7 +41,8 @@ def main(args):
         NUM_ADJACENT_SAMPLES,
         colourmap,
         STATIC_OBJECT_IDS,
-        NUM_BOX_CLOUD_POINTS
+        NUM_BOX_CLOUD_POINTS,
+        FRUSTUM_DISTANCE
     )
 
     index = NUM_ADJACENT_SAMPLES
@@ -57,7 +57,6 @@ def main(args):
         args.voxel_size, frustum
     )
 
-    #Create window visualizer
     vis = Visualizer()
     vis.add_lidar(dense_lidar, occupancy)
     vis.add_pointcloud_geometry([occupancy_box, camera.frustum])

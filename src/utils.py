@@ -188,7 +188,7 @@ def generate_box_pointclouds(box_detections, car_global_position, car_relative_p
 
     return box_clouds
 
-def generate_frustum_from_camera_extrinsics(cam_extrinsics:dict, rotation:Quaternion, image_width:int, image_height:int):
+def generate_frustum_from_camera_extrinsics(cam_extrinsics:dict, rotation:Quaternion, image_width:int, image_height:int, distance=100):
     fx = cam_extrinsics["camera_intrinsic"][0][0]
     fy = cam_extrinsics["camera_intrinsic"][1][1]
 
@@ -200,7 +200,7 @@ def generate_frustum_from_camera_extrinsics(cam_extrinsics:dict, rotation:Quater
         Quaternion(rotation).rotation_matrix,
         cam_hfov,
         cam_vfov,
-        100
+        distance
     )
     return frustum
 

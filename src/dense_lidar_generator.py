@@ -20,7 +20,8 @@ class DenseLidarGenerator:
             num_adjacent_samples:int,
             colourmap:dict,
             static_object_ids:list,
-            num_box_cloud_points:int):
+            num_box_cloud_points:int,
+            frustum_distance:float):
         self.nusc = nusc
         self.nusc_can = nusc_can
         self.scene = scene
@@ -28,6 +29,7 @@ class DenseLidarGenerator:
         self.colourmap = colourmap
         self.static_object_ids = static_object_ids
         self.num_box_cloud_points = num_box_cloud_points
+        self.frustum_distance = frustum_distance
         self.total_samples = scene["nbr_samples"]
         self.samples = []
         self.load_samples()
@@ -104,7 +106,7 @@ class DenseLidarGenerator:
                     dense_lidar.points.extend(box_cloud.points)
                     dense_lidar.colors.extend(box_cloud.colors)
 
-                camera_frustum = generate_frustum_from_camera_extrinsics(cam_front_extrinsics, car_rotation, cam_front["width"], cam_front["height"])
+                camera_frustum = generate_frustum_from_camera_extrinsics(cam_front_extrinsics, car_rotation, cam_front["width"], cam_front["height"], self.frustum_distance)
                 camera_frustum.translate(car_local_position)
 
             dense_lidar.points.extend(o3d.utility.Vector3dVector(static_lidar_geometry.points))
