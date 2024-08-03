@@ -1,189 +1,30 @@
 import os
-import time
-from math import sin, cos, radians
+from math import radians
 from argparse import ArgumentParser
 
-import cv2
 import numpy as np
 import open3d as o3d
-from open3d.geometry import get_rotation_matrix_from_xyz
 from nuscenes import NuScenes
 from nuscenes.can_bus.can_bus_api import NuScenesCanBus
-from pyquaternion import Quaternion
 from python_input import Input
+from pyquaternion import Quaternion
 
 from visualisation import Visualizer
+from utils import (
+    Transform, CarTrajectory, TimestmapData, Frustum, rotate_2d_vector, generate_frustum_from_camera_extrinsics, 
+    create_lidar_geometries, generate_box_pointclouds
+)
 
 parser = ArgumentParser()
 parser.add_argument("--dataset_root", default="/media/storage/datasets/nuscenes-v1.0-mini")
+parser.add_argument("--scene_index", type=int, default=0)
 parser.add_argument("--voxel_size", type=float, default=0.30)
 parser.add_argument("--show_image", action='store_true')
 parser.add_argument("--dataset_version", default="v1.0-mini")
 
 CAM_IMAGE_WIDTH = 1600
 CAM_IMAGE_HEIGHT = 900
-NUM_BOX_CLOUD_POINTS = 1000
-
-class Transform:
-    def __init__(self, position, rotation):
-        self.position = position
-        self.rotation = rotation
-
-class CarTrajectory:
-    def __init__(self):
-        self.position = np.array([0.0, 0.0, 0], dtype=np.float64)
-        self.rotation = np.array([0, 0, 0, 0], dtype=np.float64)
-        self.velocity = np.array([0, 0, 0], dtype=np.float64)
-        self.prev_car_ego = None
-    
-    def update(self, pose):
-        if(self.prev_car_ego is not None):
-            current_pos = np.array(pose["pos"])
-            prev_pos = np.array(self.prev_car_ego["pos"])
-
-            self.velocity = prev_pos - current_pos
-            self.position += self.velocity
-
-        self.prev_car_ego = pose
-
-class TimestmapData:
-    def __init__(self, data:list, timestamps:list):
-        assert len(data) == len(timestamps)
-        self.data = data
-        self.timestamps = np.array(timestamps)
-
-    def get_data_at_timestamp(self, timestamp):
-        min_index = np.argmin(np.abs(self.timestamps - timestamp))
-        return self.data[min_index]
-
-def rotate_2d_vector(x, y, angle):
-    new_x = x * cos(angle) - y * sin(angle)
-    new_y = x * sin(angle) + y * cos(angle)
-    return new_x, new_y
-
-def create_line(start, end, colour):
-    points = [start, end]
-    lines = [[0, 1]]
-
-    line_set = o3d.geometry.LineSet(
-        points=o3d.utility.Vector3dVector(points),
-        lines=o3d.utility.Vector2iVector(lines)
-    )
-
-    line_set.colors = o3d.utility.Vector3dVector([colour])
-
-    return line_set
-    
-
-def create_frustum_geometry(position, rotation, hfov_radians, vfov_radians, distance):
-    hfov_half = hfov_radians / 2
-    vfov_hald = vfov_radians / 2
-    
-    x, y = rotate_2d_vector(0, distance, hfov_half)
-    z, _ = rotate_2d_vector(0, distance, vfov_hald)
-
-    points = [
-        [0, 0, 0],
-        [-x, y, -z],
-        [x, y, -z],
-        [x, y, z],
-        [-x, y, z],
-    ]
-    lines = [
-        [0, 1],
-        [0, 2],
-        [0, 3],
-        [0, 4],
-        [1, 2],
-        [2, 3],
-        [3, 4],
-        [4, 1],
-    ]
-    colors = [[1.0, 0.0, 0.0] for i in range(len(lines))]
-    line_set = o3d.geometry.LineSet(
-        points=o3d.utility.Vector3dVector(points),
-        lines=o3d.utility.Vector2iVector(lines),
-    )
-    line_set.colors = o3d.utility.Vector3dVector(colors)
-    line_set.rotate(rotation, [0, 0, 0])
-    line_set.translate(position)
-    return line_set
-
-def create_lidar_geometries(pcd_path, label_path, colourmap, static_object_ids):
-    pcd_labels = np.fromfile(label_path, dtype=np.uint8)
-    point_cloud_raw = np.fromfile(pcd_path, dtype=np.float32).reshape(-1, 5)
-    point_cloud_raw = point_cloud_raw[..., 0:3]
-
-    static_points = []
-    static_labels = []
-    dynamic_points = []
-    dynamic_labels = []
-
-    for label, point in zip(pcd_labels, point_cloud_raw):
-        if(label in static_object_ids):
-            static_points.append(point)
-            static_labels.append(label)
-        else:
-            dynamic_points.append(point)
-            dynamic_labels.append(label)
-
-    static_colours = [colourmap[label] for label in static_labels]
-    dynamic_colours = [colourmap[label] for label in dynamic_labels]
-
-    static_lidar_geometry = o3d.geometry.PointCloud()
-    static_lidar_geometry.points = o3d.utility.Vector3dVector(static_points)
-    static_lidar_geometry.colors = o3d.utility.Vector3dVector(static_colours)
-
-    dynamic_lidar_geometry = o3d.geometry.PointCloud()
-    dynamic_lidar_geometry.points = o3d.utility.Vector3dVector(dynamic_points)
-    dynamic_lidar_geometry.colors = o3d.utility.Vector3dVector(dynamic_colours)
-
-    return static_lidar_geometry, dynamic_lidar_geometry
-
-def generate_box_pointclouds(box_detections, car_global_position, car_relative_position):
-    box_clouds = []
-    
-    for box in box_detections:
-        box.translate(-np.array(car_global_position))
-        w, l, h = box.wlh
-        x, y, z = box.center
-
-        # #TriangleMesh - BOTTOM LEFT ANCHOR...
-        bbox_mesh = o3d.geometry.TriangleMesh.create_box(width=l, height=w, depth=h)
-        bbox_mesh.compute_vertex_normals()
-        bbox_mesh.paint_uniform_color([1.0, 0.0, 0.0])
-
-        x -= l/2
-        y -= w/2
-        z -= h/2
-
-        bbox_mesh.translate([x, y, z], relative=True)
-        bbox_mesh.rotate(box.rotation_matrix)
-
-        R = get_rotation_matrix_from_xyz([0, 0, radians(90)]) #Again, not sure why it needs rotating 90 degrees
-        bbox_mesh.rotate(R, [0, 0, 0])
-        bbox_mesh.translate(car_relative_position, relative=True)
-
-        box_cloud = bbox_mesh.sample_points_uniformly(number_of_points=NUM_BOX_CLOUD_POINTS)
-        box_clouds.append(box_cloud)
-
-    return box_clouds
-
-def generate_frustum_from_camera_extrinsics(cam_extrinsics, rotation):
-    fx = cam_extrinsics["camera_intrinsic"][0][0]
-    fy = cam_extrinsics["camera_intrinsic"][1][1]
-
-    cam_hfov = 2 * np.arctan2(CAM_IMAGE_WIDTH, 2 * fx)
-    cam_vfov = 2 * np.arctan2(CAM_IMAGE_HEIGHT, 2 * fy)
-
-    frustum = create_frustum_geometry(
-        cam_extrinsics["translation"], 
-        Quaternion(rotation).rotation_matrix,
-        cam_hfov,
-        cam_vfov,
-        100
-    )
-    return frustum
+NUM_BOX_CLOUD_POINTS = 2000
 
 def generate_camera_view_occupancy(
         dense_pointcloud:o3d.geometry.PointCloud, 
@@ -191,7 +32,8 @@ def generate_camera_view_occupancy(
         x_scale:float, 
         y_scale:float, 
         z_scale:float,
-        voxel_size:float):
+        voxel_size:float,
+        frustum:Frustum):
 
     half_y = y_scale / 2
     half_z = z_scale / 2
@@ -206,12 +48,17 @@ def generate_camera_view_occupancy(
     cropped_points = dense_pointcloud.crop(occupancy_box)
     occupancy_cloud.points.extend(o3d.utility.Vector3dVector(cropped_points.points))
     occupancy_cloud.colors.extend(o3d.utility.Vector3dVector(cropped_points.colors))
-    occupancy_cloud.translate([0, 0, 0], False)
-    occupancy_cloud.rotate(car_transform.rotation.inverse.rotation_matrix)
+
+    visible_cloud = o3d.geometry.PointCloud()
+
+    for point, color in zip(occupancy_cloud.points, occupancy_cloud.colors):
+        if(frustum.contains_point(point)):
+            visible_cloud.points.append(point)
+            visible_cloud.colors.append(color)
     
-    return o3d.geometry.VoxelGrid.create_from_point_cloud(occupancy_cloud, voxel_size=voxel_size)
-
-
+    visible_cloud.translate([0, 0, 0], False)
+    visible_cloud.rotate(car_transform.rotation.inverse.rotation_matrix)
+    return o3d.geometry.VoxelGrid.create_from_point_cloud(visible_cloud, voxel_size=voxel_size), occupancy_box
 
 class DenseLidarGenerator:
     def __init__(
@@ -254,7 +101,8 @@ class DenseLidarGenerator:
             raise Exception(f"Index {index} out of range")
 
         current_sample = self.samples[index]
-        current_car_transform = None
+        camera_transform = None
+        frustum = None
 
         for i in range(start, end):
             #This part can be parallelised and takes the most time (0.17s per sample)
@@ -290,7 +138,9 @@ class DenseLidarGenerator:
             static_lidar_geometry.translate(car_local_position, relative=True)
             
             if(sample == current_sample):
-                current_car_transform = Transform(car_local_position, car_rotation)
+                camera_pos = car_local_position + cam_front_extrinsics["translation"]
+                camera_pos[2] = car_local_position[2]
+                camera_transform = Transform(camera_pos, car_rotation)
                 dynamic_lidar_geometry.rotate(car_rotation.rotation_matrix, [0,0,0])
                 dynamic_lidar_geometry.translate(lidar_origin, relative=True)
                 dynamic_lidar_geometry.translate(car_local_position, relative=True) 
@@ -301,10 +151,13 @@ class DenseLidarGenerator:
                     dense_lidar.points.extend(box_cloud.points)
                     dense_lidar.colors.extend(box_cloud.colors)
 
+                frustum = generate_frustum_from_camera_extrinsics(cam_front_extrinsics, car_rotation, CAM_IMAGE_WIDTH, CAM_IMAGE_HEIGHT)
+                frustum.translate(car_local_position)
+
             dense_lidar.points.extend(o3d.utility.Vector3dVector(static_lidar_geometry.points))
             dense_lidar.colors.extend(o3d.utility.Vector3dVector(static_lidar_geometry.colors))
 
-        return dense_lidar, current_car_transform
+        return dense_lidar, camera_transform, frustum
     
 def main(args):
     inp = Input()
@@ -325,18 +178,22 @@ def main(args):
     lidar_generator = DenseLidarGenerator(
         nusc,
         nusc_can,
-        nusc.scene[0],
+        nusc.scene[args.scene_index],
         num_adjacent_samples,
         colourmap,
         static_object_ids
     )
 
     index = num_adjacent_samples
-    dense_lidar, car_transform = lidar_generator.get(index)
-    occupancy = generate_camera_view_occupancy(dense_lidar, car_transform, 35, 35, 10, args.voxel_size)
+    dense_lidar, car_transform, frustum_geometry = lidar_generator.get(index)
+    frustum = Frustum(frustum_geometry.points)
+    occupancy, occupancy_box = generate_camera_view_occupancy(dense_lidar, car_transform, 35, 35, 10, args.voxel_size, frustum)
+
     #Create window visualizer
     vis = Visualizer()
     vis.add_lidar(dense_lidar, occupancy)
+    vis.add_pointcloud_geometry(occupancy_box)
+    vis.add_pointcloud_geometry(frustum_geometry)
 
     while(True):
         try:
@@ -345,10 +202,13 @@ def main(args):
 
             if(inp.get_key_down("space")):
                 index += 1
-                dense_lidar, car_transform = lidar_generator.get(index)
-                occupancy = generate_camera_view_occupancy(dense_lidar, car_transform, 35, 35, 10, args.voxel_size)
+                dense_lidar, car_transform, frustum_geometry = lidar_generator.get(index)
+                occupancy, occupancy_box = generate_camera_view_occupancy(dense_lidar, car_transform, 35, 35, 10, args.voxel_size, frustum)
+                frustum = Frustum(frustum_geometry.points)
                 vis.reset()
                 vis.add_lidar(dense_lidar, occupancy)
+                vis.add_pointcloud_geometry(occupancy_box)
+                vis.add_pointcloud_geometry(frustum_geometry)
 
             if(inp.get_key_down("a")):
                 pass
