@@ -1,3 +1,5 @@
+from typing import List
+
 import numpy as np
 import open3d as o3d
 
@@ -42,8 +44,12 @@ class Visualizer:
         self.occupancy_vis.add_geometry(occupancy, self.reset_bounding_box)
         self.reset_bounding_box = False
     
-    def add_pointcloud_geometry(self, geometry:o3d.geometry.Geometry, reset_bounding_box:bool=False):
-        self.pointcloud_vis.add_geometry(geometry, reset_bounding_box)
+    def add_pointcloud_geometry(self, geometry:List[o3d.geometry.Geometry], reset_bounding_box:bool=False):
+        if(not isinstance(geometry, list)):
+            geometry = [geometry]
+
+        for geo in geometry:
+            self.pointcloud_vis.add_geometry(geo, reset_bounding_box)
 
     def reset(self):
         self.pointcloud_vis.clear_geometries()

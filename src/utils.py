@@ -5,6 +5,7 @@ import open3d as o3d
 from open3d.geometry import get_rotation_matrix_from_xyz
 from pyquaternion import Quaternion
 
+
 class Transform:
     def __init__(self, position, rotation):
         self.position = position
@@ -47,6 +48,33 @@ class PointCloudTimeseries:
     def add_geometry(self, lidar_geometry):
         self.combined_geometry.points.extend(o3d.utility.Vector3dVector(lidar_geometry.points))
         self.combined_geometry.colors.extend(o3d.utility.Vector3dVector(lidar_geometry.colors))
+
+class Frustum:
+    def __init__(self, points):
+        self.planes = [
+            [points[0], points[1], points[2]],
+            [points[0], points[2], points[3]],
+            [points[0], points[3], points[4]],
+            [points[0], points[4], points[1]],
+            [points[4], points[3], points[2], points[1]],
+        ]
+
+        self.normals = []
+        for plane in self.planes:
+            normal = np.cross((plane[1] - plane[0]), (plane[2] - plane[0]))
+            self.normals.append(normal)
+    
+    def contains_point(self, point:np.ndarray):
+        for plane, normal in zip(self.planes, self.normals):
+            if(np.dot(plane[0] - point, normal) < 0):
+                return False
+        
+        return True
+
+class Camera:
+    def __init__(self, transform, frustum):
+        self.transform = transform
+        self.frustum = frustum
 
 def rotate_2d_vector(x, y, angle):
     new_x = x * cos(angle) - y * sin(angle)
@@ -204,24 +232,37 @@ def generate_boxes_meshes(boxes, car_global_position, car_relative_position):
 
     return box_meshes
 
-class Frustum:
-    def __init__(self, points):
-        self.planes = [
-            [points[0], points[1], points[2]],
-            [points[0], points[2], points[3]],
-            [points[0], points[3], points[4]],
-            [points[0], points[4], points[1]],
-            [points[4], points[3], points[2], points[1]],
-        ]
+def generate_camera_view_occupancy(
+        dense_pointcloud:o3d.geometry.PointCloud, 
+        car_transform:Transform,
+        x_scale:float, 
+        y_scale:float, 
+        z_scale:float,
+        voxel_size:float,
+        frustum:Frustum):
 
-        self.normals = []
-        for plane in self.planes:
-            normal = np.cross((plane[1] - plane[0]), (plane[2] - plane[0]))
-            self.normals.append(normal)
+    half_y = y_scale / 2
+    half_z = z_scale / 2
+
+    occupancy_box_pos = car_transform.position + np.array([0, half_y, half_z])
+    occupancy_box = o3d.geometry.OrientedBoundingBox(occupancy_box_pos, np.eye(3), (x_scale, y_scale, z_scale))
+    occupancy_box.rotate(car_transform.rotation.rotation_matrix, car_transform.position)
+    occupancy_box.color = (1.0, 1.0, 0.0)
+
+    occupancy_cloud = o3d.geometry.PointCloud()
+
+    cropped_points = dense_pointcloud.crop(occupancy_box)
+    occupancy_cloud.points.extend(o3d.utility.Vector3dVector(cropped_points.points))
+    occupancy_cloud.colors.extend(o3d.utility.Vector3dVector(cropped_points.colors))
+
+    visible_cloud = o3d.geometry.PointCloud()
+
+    for point, color in zip(occupancy_cloud.points, occupancy_cloud.colors):
+        if(frustum.contains_point(point)):
+            visible_cloud.points.append(point)
+            visible_cloud.colors.append(color)
     
-    def contains_point(self, point:np.ndarray):
-        for plane, normal in zip(self.planes, self.normals):
-            if(np.dot(plane[0] - point, normal) < 0):
-                return False
-        
-        return True
+    visible_cloud.translate([0, 0, 0], False)
+    visible_cloud.rotate(car_transform.rotation.inverse.rotation_matrix)
+    return o3d.geometry.VoxelGrid.create_from_point_cloud(visible_cloud, voxel_size=voxel_size), occupancy_box
+
