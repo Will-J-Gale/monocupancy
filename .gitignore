@@ -1,4 +1,4 @@
 *.png
 *.json
-
 **/__pycache__/**
+test/*
