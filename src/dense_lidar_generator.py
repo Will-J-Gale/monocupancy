@@ -60,7 +60,7 @@ class DenseLidarGenerator:
 
         current_sample = self.samples[index]
         camera_transform = None
-        camera_frustum = None
+        camera_frustum_geometry = None
         image_path = None
         lidar_futures = []
         lidar_batch = []
@@ -131,10 +131,10 @@ class DenseLidarGenerator:
                     dense_lidar.points.extend(box_cloud.points)
                     dense_lidar.colors.extend(box_cloud.colors)
 
-                camera_frustum = generate_frustum_from_camera_extrinsics(cam_front_extrinsics, car_rotation, cam_front["width"], cam_front["height"], self.frustum_distance)
-                camera_frustum.translate(car_local_position)
+                camera_frustum_geometry = generate_frustum_from_camera_extrinsics(cam_front_extrinsics, car_rotation, cam_front["width"], cam_front["height"], self.frustum_distance)
+                camera_frustum_geometry.translate(car_local_position)
 
             dense_lidar.points.extend(o3d.utility.Vector3dVector(static_lidar_geometry.points))
             dense_lidar.colors.extend(o3d.utility.Vector3dVector(static_lidar_geometry.colors))
 
-        return dense_lidar, Camera(camera_transform, camera_frustum, image_path)
+        return dense_lidar, Camera(camera_transform, camera_frustum_geometry, image_path)

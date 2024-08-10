@@ -71,9 +71,9 @@ class Frustum:
         return True
 
 class Camera:
-    def __init__(self, transform, frustum, image_path):
+    def __init__(self, transform, frustum_geometry, image_path):
         self.transform = transform
-        self.frustum = frustum
+        self.frustum_geometry = frustum_geometry
         self.image_path = image_path
 
 def rotate_2d_vector(x, y, angle):

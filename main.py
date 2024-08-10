@@ -47,7 +47,7 @@ def main(args):
 
     index = NUM_FUTURE_SAMPLES
     dense_lidar, camera = lidar_generator.get(index)
-    frustum = Frustum(camera.frustum.points)
+    frustum = Frustum(camera.frustum_geometry.points)
     occupancy, occupancy_box = generate_camera_view_occupancy(
         dense_lidar, 
         camera.transform, 
@@ -59,7 +59,7 @@ def main(args):
     
     vis = Visualizer()
     vis.add_lidar(dense_lidar, occupancy)
-    vis.add_pointcloud_geometry([occupancy_box, camera.frustum])
+    vis.add_pointcloud_geometry([occupancy_box, camera.frustum_geometry])
 
     while(True):
         try:
@@ -69,18 +69,19 @@ def main(args):
             if(inp.get_key_down("space")):
                 index += 1
                 dense_lidar, camera = lidar_generator.get(index)
+                frustum = Frustum(camera.frustum_geometry.points)
                 occupancy, occupancy_box = generate_camera_view_occupancy(
                     dense_lidar, 
                     camera.transform, 
                     OCCUPANCY_GRID_WIDTH, 
                     OCCUPANCY_GRID_DEPTH, 
                     OCCUPANCY_GRID_HEIGHT, 
-                    args.voxel_size, frustum
+                    args.voxel_size, 
+                    frustum
                 )
-                frustum = Frustum(camera.frustum.points)
                 vis.reset()
                 vis.add_lidar(dense_lidar, occupancy)
-                vis.add_pointcloud_geometry([occupancy_box, camera.frustum])
+                vis.add_pointcloud_geometry([occupancy_box, camera.frustum_geometry])
 
             if(inp.get_key_down("a")):
                 pass
