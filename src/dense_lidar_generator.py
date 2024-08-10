@@ -1,7 +1,7 @@
 import os
 from math import radians
 from typing import Tuple
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, Future
 
 import numpy as np
 import open3d as o3d
@@ -33,7 +33,9 @@ class DenseLidarGenerator:
         self.frustum_distance = frustum_distance
         self.total_samples = scene["nbr_samples"]
         self.samples = []
+        self.lidar_cache = {}
         self.load_samples()
+
 
         pose = nusc_can.get_messages(scene["name"], 'pose')
         self.pose_dataset = TimestmapData(pose, [p["utime"] for p in pose])
@@ -60,20 +62,29 @@ class DenseLidarGenerator:
         camera_transform = None
         camera_frustum = None
         image_path = None
-        loaded_lidar = []
+        lidar_futures = []
+        lidar_batch = []
         
         with ProcessPoolExecutor(max_workers=16) as executor:
             for i in range(start, end):
-                #This part can be parallelised and takes the most time (0.17s per sample)
                 sample = self.samples[i]
-                lidar_token = sample['data']['LIDAR_TOP']
-                pcd_path = self.nusc.get_sample_data_path(lidar_token)
-                pcd_labels_path = os.path.join(self.nusc.dataroot, f"lidarseg/{self.nusc.version}", lidar_token + '_lidarseg.bin')
-                future = executor.submit(create_lidar_geometries, pcd_path, pcd_labels_path, self.colourmap.copy(), self.static_object_ids.copy())
-                loaded_lidar.append((sample, future))
 
-        for sample, future in loaded_lidar:
-            dynamic_points, dynamic_colours, static_points, static_colours = future.result()
+                if(sample["token"] not in self.lidar_cache):
+                    lidar_token = sample['data']['LIDAR_TOP']
+                    pcd_path = self.nusc.get_sample_data_path(lidar_token)
+                    pcd_labels_path = os.path.join(self.nusc.dataroot, f"lidarseg/{self.nusc.version}", lidar_token + '_lidarseg.bin')
+                    future = executor.submit(create_lidar_geometries, pcd_path, pcd_labels_path, self.colourmap.copy(), self.static_object_ids.copy())
+                    lidar_futures.append((sample, future))
+                else:
+                    lidar_futures.append((sample, self.lidar_cache[sample["token"]]))
+
+        for sample, data in lidar_futures:
+            if(isinstance(data, Future)):
+                lidar_batch.append((sample, data.result()))
+            else:
+                lidar_batch.append((sample, data))
+
+        for sample, (dynamic_points, dynamic_colours, static_points, static_colours) in lidar_batch:
             static_lidar_geometry = o3d.geometry.PointCloud()
             static_lidar_geometry.points = o3d.utility.Vector3dVector(static_points)
             static_lidar_geometry.colors = o3d.utility.Vector3dVector(static_colours)
@@ -95,7 +106,6 @@ class DenseLidarGenerator:
             car_rotation = Quaternion(ego["rotation"])
             can_pose_at_timestamp = self.pose_dataset.get_data_at_timestamp(lidar["timestamp"])
 
-            #This part cannot be parallelised as it needs all above data but it's super fast (0.0008s per sample)
             car_trajectory.update(can_pose_at_timestamp)
 
             car_local_position = car_trajectory.position.copy()
