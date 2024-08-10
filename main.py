@@ -16,7 +16,7 @@ parser.add_argument("--show_image", action='store_true')
 parser.add_argument("--dataset_version", default="v1.0-mini")
 
 STATIC_OBJECT_IDS = [ 0, 13, 24, 25, 26, 27, 28, 29, 30 ]
-NUM_BOX_CLOUD_POINTS = 2000
+NUM_BOX_CLOUD_POINTS = 4000
 OCCUPANCY_GRID_WIDTH = 35
 OCCUPANCY_GRID_DEPTH = 35
 OCCUPANCY_GRID_HEIGHT= 10
