@@ -85,6 +85,8 @@ class DenseLidarGenerator:
                 lidar_batch.append((sample, data))
 
         for sample, (dynamic_points, dynamic_colours, static_points, static_colours) in lidar_batch:
+            # Creating points using Vector3dVector takes ~400ms but cannot be cached because of the later translations
+            # It uses a different translation each time
             static_lidar_geometry = o3d.geometry.PointCloud()
             static_lidar_geometry.points = o3d.utility.Vector3dVector(static_points)
             static_lidar_geometry.colors = o3d.utility.Vector3dVector(static_colours)
