@@ -71,10 +71,10 @@ class Frustum:
         return True
 
 class Camera:
-    def __init__(self, transform, frustum_geometry, image_path):
+    def __init__(self, transform, frustum_geometry, image_paths):
         self.transform = transform
         self.frustum_geometry = frustum_geometry
-        self.image_path = image_path
+        self.image_paths = image_paths
 
 def rotate_2d_vector(x, y, angle):
     new_x = x * cos(angle) - y * sin(angle)
@@ -259,5 +259,15 @@ def generate_camera_view_occupancy(
     
     visible_cloud.translate([0, 0, 0], False)
     visible_cloud.rotate(car_transform.rotation.inverse.rotation_matrix)
-    return o3d.geometry.VoxelGrid.create_from_point_cloud(visible_cloud, voxel_size=voxel_size), occupancy_box
+    occupancy_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(visible_cloud, voxel_size=voxel_size)
+    return occupancy_grid, occupancy_box
 
+def occupancy_grid_to_list(occupancy_grid:o3d.geometry.VoxelGrid):
+    #Grid is X, Z, Y
+    grid_points = []
+    colours = []
+    for voxel in occupancy_grid.get_voxels():
+        grid_points.append(list(voxel.grid_index))
+        colours.append(list(voxel.color))
+
+    return grid_points, colours

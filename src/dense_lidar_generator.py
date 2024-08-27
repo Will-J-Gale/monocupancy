@@ -18,7 +18,8 @@ class DenseLidarGenerator:
             nusc, 
             nusc_can, 
             scene:dict, 
-            num_adjacent_samples:int,
+            num_future_samples:int,
+            num_video_frames:int,
             colourmap:dict,
             static_object_ids:list,
             num_box_cloud_points:int,
@@ -26,7 +27,8 @@ class DenseLidarGenerator:
         self.nusc = nusc
         self.nusc_can = nusc_can
         self.scene = scene
-        self.num_future_samples = num_adjacent_samples
+        self.num_video_frames = num_video_frames
+        self.num_future_samples = num_future_samples
         self.colourmap = colourmap
         self.static_object_ids = static_object_ids
         self.num_box_cloud_points = num_box_cloud_points
@@ -34,11 +36,13 @@ class DenseLidarGenerator:
         self.total_samples = scene["nbr_samples"]
         self.samples = []
         self.lidar_cache = {}
+        self.sample_offset = num_video_frames - 1
+        self.current_index = 0
         self.load_samples()
-
 
         pose = nusc_can.get_messages(scene["name"], 'pose')
         self.pose_dataset = TimestmapData(pose, [p["utime"] for p in pose])
+        self.length = len(self.samples) - self.num_future_samples - self.num_video_frames
     
     def load_samples(self) -> None:
         sample = self.nusc.get("sample", self.scene["first_sample_token"])
@@ -48,22 +52,38 @@ class DenseLidarGenerator:
             sample = self.nusc.get("sample", sample["next"])
             self.samples.append(sample)
 
-    def get(self, index:int) -> Tuple[o3d.geometry.PointCloud, Camera]:
+    def __len__(self):
+        return self.length
+
+    def __iter__(self):
+        self.current_index = 0
+        return self
+
+    def __next__(self):
+        if(self.current_index >= self.length):
+            raise StopIteration
+
+        return_value = self[self.current_index]
+        self.current_index += 1
+        return return_value
+
+    def __getitem__(self, index:int) -> Tuple[o3d.geometry.PointCloud, Camera]:
         car_trajectory = CarTrajectory()
         dense_lidar = o3d.geometry.PointCloud()
         
-        start = index
-        end = index + self.num_future_samples
+        start = self.sample_offset + index
+        end = start + self.num_future_samples
 
         if(start < 0 or end >= len(self.samples)):
             raise Exception(f"Index {index} out of range")
 
-        current_sample = self.samples[index]
+        current_sample = self.samples[start]
         camera_transform = None
         camera_frustum_geometry = None
         image_path = None
         lidar_futures = []
         lidar_batch = []
+        image_paths = self._get_previous_frame_paths(start)
         
         with ProcessPoolExecutor(max_workers=16) as executor:
             for i in range(start, end):
@@ -86,7 +106,7 @@ class DenseLidarGenerator:
 
         for sample, (dynamic_points, dynamic_colours, static_points, static_colours) in lidar_batch:
             # Creating points using Vector3dVector takes ~400ms but cannot be cached because of the later translations
-            # It uses a different translation each time
+            # it requires a different translation each time
             static_lidar_geometry = o3d.geometry.PointCloud()
             static_lidar_geometry.points = o3d.utility.Vector3dVector(static_points)
             static_lidar_geometry.colors = o3d.utility.Vector3dVector(static_colours)
@@ -117,7 +137,6 @@ class DenseLidarGenerator:
             static_lidar_geometry.translate(car_local_position, relative=True)
             
             if(sample == current_sample):
-                image_path = cam_front["filename"]
                 camera_pos = car_local_position + cam_front_extrinsics["translation"]
                 camera_pos[2] = car_local_position[2]
                 camera_transform = Transform(camera_pos, car_rotation)
@@ -137,4 +156,16 @@ class DenseLidarGenerator:
             dense_lidar.points.extend(o3d.utility.Vector3dVector(static_lidar_geometry.points))
             dense_lidar.colors.extend(o3d.utility.Vector3dVector(static_lidar_geometry.colors))
 
-        return dense_lidar, Camera(camera_transform, camera_frustum_geometry, image_path)
+        return dense_lidar, Camera(camera_transform, camera_frustum_geometry, image_paths)
+
+    def _get_previous_frame_paths(self, current_sample_index):
+        end = current_sample_index + 1
+        start = current_sample_index - (self.num_video_frames - 1)
+        image_paths = []
+
+        for i in range(start, end):
+            sample = self.samples[i]
+            cam_front = self.nusc.get('sample_data', sample['data']['CAM_FRONT'])
+            image_paths.append(cam_front["filename"])
+            
+        return image_paths
