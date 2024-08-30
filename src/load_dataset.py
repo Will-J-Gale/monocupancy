@@ -9,7 +9,6 @@ def load_dataset(dataset_path:str):
             metadata = pickle.load(file)
             while(True):
                 data = pickle.load(file)
-                print(type(data))
                 occupancy.append(data)
         except EOFError:
             pass
