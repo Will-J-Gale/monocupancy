@@ -80,7 +80,6 @@ class DenseLidarGenerator:
         current_sample = self.samples[start]
         camera_transform = None
         camera_frustum_geometry = None
-        image_path = None
         lidar_futures = []
         lidar_batch = []
         image_paths = self._get_previous_frame_paths(start)
@@ -167,6 +166,7 @@ class DenseLidarGenerator:
         for i in range(start, end):
             sample = self.samples[i]
             cam_front = self.nusc.get('sample_data', sample['data']['CAM_FRONT'])
-            image_paths.append(cam_front["filename"])
+            image_path = os.path.join(self.nusc.dataroot, cam_front["filename"])
+            image_paths.append(image_path)
             
         return image_paths

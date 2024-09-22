@@ -1,5 +1,5 @@
 import shelve
-from io import TextIOWrapper
+from shelve import DbfilenameShelf
 from argparse import ArgumentParser
 
 from nuscenes import NuScenes
@@ -22,7 +22,7 @@ parser.add_argument("--output_dir", default=".")
 parser.add_argument("--dataset_version", default="v1.0-trainval", choices=["v1.0-trainval", "v1.0-test", "v1.0-mini"])
 
 def process_scene(
-        dataset_file:TextIOWrapper,
+        dataset_file:DbfilenameShelf,
         scene:dict, 
         nusc:NuScenes, 
         nusc_can:NuScenesCanBus, 
@@ -54,7 +54,6 @@ def process_scene(
         )
 
         occupancy_points_list, occupancy_colours = occupancy_grid_to_list(occupancy)
-
         data = {
             "image_paths": camera.image_paths,
             "occupancy": occupancy_points_list,
