@@ -296,7 +296,7 @@ def generate_camera_view_occupancy(
 
     for voxel in occupancy_grid.get_voxels():
         x, y, z = voxel.grid_index
-        if(x < 0 or x > max_x or y < 0 or y > max_y or z < 0 or z > max_z):
+        if(x < 0 or x >= max_x or y < 0 or y >= max_y or z < 0 or z >= max_z):
             occupancy_grid.remove_voxel(voxel.grid_index)
 
     return occupancy_grid
