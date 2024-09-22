@@ -67,7 +67,6 @@ def process_scene(
 
         metadata["length"] = index + 1
         dataset_file["metadata"] = metadata
-        break
 
 def main(args):
     nusc = NuScenes(version=args.dataset_version, dataroot=args.dataset_root, verbose=False)
@@ -103,7 +102,6 @@ def main(args):
                 args.voxel_size, 
                 args.num_video_frames, 
             )
-            break
     except KeyboardInterrupt:
         return
     
