@@ -10,22 +10,18 @@ from python_input import Input
 from src.visualisation import Visualizer
 from src.utils import Frustum, generate_camera_view_occupancy
 from src.dense_lidar_generator import DenseLidarGenerator
+from src.constants import (
+    STATIC_OBJECT_IDS, NUM_BOX_CLOUD_POINTS, OCCUPANCY_GRID_WIDTH,
+    OCCUPANCY_GRID_HEIGHT, OCCUPANCY_GRID_DEPTH, NUM_FUTURE_SAMPLES,
+    FRUSTUM_DISTANCE, NUM_VIDEO_FRAMES, DEFAULT_VOXEL_SIZE
+)
 
 parser = ArgumentParser()
 parser.add_argument("--dataset_root", default="/media/storage/datasets/nuscenes-v1.0-mini")
 parser.add_argument("--scene_index", type=int, default=0)
-parser.add_argument("--voxel_size", type=float, default=0.30)
+parser.add_argument("--voxel_size", type=float, default=DEFAULT_VOXEL_SIZE)
 parser.add_argument("--show_image", action='store_true')
 parser.add_argument("--dataset_version", default="v1.0-mini")
-
-STATIC_OBJECT_IDS = [ 0, 13, 24, 25, 26, 27, 28, 29, 30 ]
-NUM_BOX_CLOUD_POINTS = 4000
-OCCUPANCY_GRID_WIDTH = 35
-OCCUPANCY_GRID_DEPTH = 35
-OCCUPANCY_GRID_HEIGHT= 10
-NUM_FUTURE_SAMPLES = 15
-FRUSTUM_DISTANCE = 100
-NUM_VIDEO_FRAMES = 4
 
 def main(args):
     inp = Input()
@@ -52,19 +48,21 @@ def main(args):
 
     index = 0
     dense_lidar, camera = lidar_generator[index]
-    frustum = Frustum(camera.frustum_geometry.points)
-    occupancy, occupancy_box = generate_camera_view_occupancy(
+    occupancy_grid = generate_camera_view_occupancy(
         dense_lidar, 
         camera.transform, 
         OCCUPANCY_GRID_WIDTH, 
         OCCUPANCY_GRID_DEPTH, 
         OCCUPANCY_GRID_HEIGHT, 
-        args.voxel_size, frustum
+        args.voxel_size, 
+        camera
     )
-    
+
     vis = Visualizer()
-    vis.add_lidar(dense_lidar, occupancy)
-    vis.add_pointcloud_geometry([occupancy_box, camera.frustum_geometry])
+    vis.add(
+        [dense_lidar, camera.frustum_geometry], 
+        occupancy_grid, 
+    )
 
     while(True):
         try:
@@ -74,19 +72,20 @@ def main(args):
             if(inp.get_key_down("space")):
                 index += 1
                 dense_lidar, camera = lidar_generator[index]
-                frustum = Frustum(camera.frustum_geometry.points)
-                occupancy, occupancy_box = generate_camera_view_occupancy(
+                occupancy_grid = generate_camera_view_occupancy(
                     dense_lidar, 
                     camera.transform, 
                     OCCUPANCY_GRID_WIDTH, 
                     OCCUPANCY_GRID_DEPTH, 
                     OCCUPANCY_GRID_HEIGHT, 
                     args.voxel_size, 
-                    frustum
+                    camera
                 )
                 vis.reset()
-                vis.add_lidar(dense_lidar, occupancy)
-                vis.add_pointcloud_geometry([occupancy_box, camera.frustum_geometry])
+                vis.add(
+                    [dense_lidar, camera.frustum_geometry],
+                    occupancy_grid, 
+                )
 
             if(inp.get_key_down("a")):
                 pass

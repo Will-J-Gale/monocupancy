@@ -128,6 +128,38 @@ def create_frustum_geometry(position, rotation, hfov_radians, vfov_radians, dist
     line_set.translate(position)
     return line_set
 
+def create_frustum_geometry_at_origin(hfov_radians, vfov_radians, distance):
+    hfov_half = hfov_radians / 2
+    vfov_half = vfov_radians / 2
+    
+    x, y = rotate_2d_vector(0, distance, hfov_half)
+    z, _ = rotate_2d_vector(0, distance, vfov_half)
+
+    points = [
+        [0, 0, 0],
+        [-x, y, -z],
+        [x, y, -z],
+        [x, y, z],
+        [-x, y, z],
+    ]
+    lines = [
+        [0, 1],
+        [0, 2],
+        [0, 3],
+        [0, 4],
+        [1, 2],
+        [2, 3],
+        [3, 4],
+        [4, 1],
+    ]
+    colors = [[1.0, 0.0, 0.0] for i in range(len(lines))]
+    line_set = o3d.geometry.LineSet(
+        points=o3d.utility.Vector3dVector(points),
+        lines=o3d.utility.Vector2iVector(lines),
+    )
+    line_set.colors = o3d.utility.Vector3dVector(colors)
+    return line_set
+
 def create_lidar_geometries(pcd_path, label_path, colourmap, static_object_ids):
     pcd_labels = np.fromfile(label_path, dtype=np.uint8)
     point_cloud_raw = np.fromfile(pcd_path, dtype=np.float32).reshape(-1, 5)
@@ -234,8 +266,9 @@ def generate_camera_view_occupancy(
         y_scale:float, 
         z_scale:float,
         voxel_size:float,
-        frustum:Frustum):
+        camera:Camera):
 
+    frustum = Frustum(camera.frustum_geometry.points)
     half_y = y_scale / 2
     half_z = z_scale / 2
 
@@ -244,26 +277,32 @@ def generate_camera_view_occupancy(
     occupancy_box.rotate(car_transform.rotation.rotation_matrix, car_transform.position)
     occupancy_box.color = (1.0, 1.0, 0.0)
 
-    occupancy_cloud = o3d.geometry.PointCloud()
-
     cropped_points = dense_pointcloud.crop(occupancy_box)
-    occupancy_cloud.points.extend(o3d.utility.Vector3dVector(cropped_points.points))
-    occupancy_cloud.colors.extend(o3d.utility.Vector3dVector(cropped_points.colors))
+    frustum_cropped_points = o3d.geometry.PointCloud()
 
-    visible_cloud = o3d.geometry.PointCloud()
-
-    for point, color in zip(occupancy_cloud.points, occupancy_cloud.colors):
+    for point, color in zip(cropped_points.points, cropped_points.colors):
         if(frustum.contains_point(point)):
-            visible_cloud.points.append(point)
-            visible_cloud.colors.append(color)
-    
-    visible_cloud.translate([0, 0, 0], False)
-    visible_cloud.rotate(car_transform.rotation.inverse.rotation_matrix)
-    occupancy_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(visible_cloud, voxel_size=voxel_size)
-    return occupancy_grid, occupancy_box
+            frustum_cropped_points.points.append(point)
+            frustum_cropped_points.colors.append(color)
+
+    frustum_cropped_points.rotate(car_transform.rotation.inverse.rotation_matrix, car_transform.position)
+    frustum_cropped_points.translate(-occupancy_box_pos, True)
+    frustum_cropped_points.translate([0, half_y, half_z], True)
+    occupancy_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(frustum_cropped_points, voxel_size=voxel_size)
+
+    max_x = x_scale / voxel_size
+    max_y = y_scale / voxel_size
+    max_z = z_scale / voxel_size
+
+    for voxel in occupancy_grid.get_voxels():
+        x, y, z = voxel.grid_index
+        if(x < 0 or x > max_x or y < 0 or y > max_y or z < 0 or z > max_z):
+            occupancy_grid.remove_voxel(voxel.grid_index)
+
+    return occupancy_grid
 
 def occupancy_grid_to_list(occupancy_grid:o3d.geometry.VoxelGrid):
-    #Grid is X, Z, Y
+    #Grid is X, Z, Y???
     grid_points = []
     colours = []
     for voxel in occupancy_grid.get_voxels():

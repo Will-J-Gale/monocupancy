@@ -14,9 +14,11 @@ class WindowOptions:
 class Visualizer:
     def __init__(
             self,
-            point_cloud_vis_options:WindowOptions=WindowOptions(0, 0, 1920, 1080, "Dense point cloud"),
-            occupancy_vis_options:WindowOptions=WindowOptions(1920, 0, 500, 500, "Occupancy")):
+            point_cloud_vis_options:WindowOptions=WindowOptions(0, 0, 1920 // 2, 1080, "Dense point cloud"),
+            occupancy_vis_options:WindowOptions=WindowOptions(1920 // 2, 0, 1920 // 2, 1080, "Occupancy")
+        ):
         self.pointcloud_vis = o3d.visualization.Visualizer()
+        self.occupancy_crop_vis = o3d.visualization.Visualizer()
         self.occupancy_vis = o3d.visualization.Visualizer()
 
         self.pointcloud_vis.create_window(
@@ -38,10 +40,12 @@ class Visualizer:
         self.occupancy_vis.get_render_option().background_color = np.asarray([0, 0, 0])
 
         self.reset_bounding_box = True # Force camera to show whole lidar on first render
+        self.origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=10, origin=[0, 0, 0]) 
+        self.reset()
     
-    def add_lidar(self, dense_lidar:o3d.geometry.PointCloud, occupancy:o3d.geometry.VoxelGrid):
-        self.pointcloud_vis.add_geometry(dense_lidar, self.reset_bounding_box)
-        self.occupancy_vis.add_geometry(occupancy, self.reset_bounding_box)
+    def add(self, point_cloud:List[o3d.geometry.PointCloud], occupancy:List[o3d.geometry.VoxelGrid]):
+        self.add_pointcloud_geometry(point_cloud, self.reset_bounding_box)
+        self.add_occupancy_geometry(occupancy, self.reset_bounding_box)
         self.reset_bounding_box = False
     
     def add_pointcloud_geometry(self, geometry:List[o3d.geometry.Geometry], reset_bounding_box:bool=False):
@@ -50,11 +54,21 @@ class Visualizer:
 
         for geo in geometry:
             self.pointcloud_vis.add_geometry(geo, reset_bounding_box)
+        
+    def add_occupancy_geometry(self, geometry:List[o3d.geometry.Geometry], reset_bounding_box:bool=False):
+        if(not isinstance(geometry, list)):
+            geometry = [geometry]
 
+        for geo in geometry:
+            self.occupancy_vis.add_geometry(geo, reset_bounding_box)
+    
     def reset(self):
         self.pointcloud_vis.clear_geometries()
         self.occupancy_vis.clear_geometries()
 
+        self.pointcloud_vis.add_geometry(self.origin, self.reset_bounding_box)
+        self.occupancy_vis.add_geometry(self.origin, self.reset_bounding_box)
+        
     def render(self):
         self.pointcloud_vis.update_renderer()
         self.occupancy_vis.update_renderer()

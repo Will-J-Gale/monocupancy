@@ -2,16 +2,16 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
+import shelve
 from argparse import ArgumentParser
 
 import open3d as o3d
 from python_input import Input
 
 from src.visualisation import Visualizer
-from src.load_dataset import load_dataset
 
 parser = ArgumentParser()
-parser.add_argument("--occupancy_path")
+parser.add_argument("occupancy_path")
 
 OCCUPANCY_SIZE = 0.3
 OCCUPANCY_GRID_WIDTH = 35
@@ -38,10 +38,12 @@ def main(args):
     vis = Visualizer()
     index = 0
 
-    metadata, occupancy = load_dataset(args.occupancy_path)
+    dataset = shelve.open(args.occupancy_path, "r")
+    metadata = dataset["metadata"]
+    dataset_length = metadata["length"]
 
     load_occupancy_grid(
-        occupancy[index], 
+        dataset[str(index)], 
         vis,
         metadata["voxel_size"],
         metadata["grid_width"],
@@ -50,18 +52,18 @@ def main(args):
     )
 
     while(True):
-        if(not vis.poll_events()):
+        if(not vis.poll_events() or inp.get_key_down("q")):
             break
 
         if(inp.any_key_pressed()):
             if(inp.get_key_down("space")):
-                index = min(index + 1, len(occupancy) - 1)
+                index = min(index + 1, dataset_length - 1)
             elif(inp.get_key_down("a")):
                 index = max(index - 1, 0)
             
             vis.reset()
             load_occupancy_grid(
-                occupancy[index], 
+                dataset[str(index)], 
                 vis,
                 metadata["voxel_size"],
                 metadata["grid_width"],

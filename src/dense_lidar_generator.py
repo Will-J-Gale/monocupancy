@@ -156,6 +156,7 @@ class DenseLidarGenerator:
             dense_lidar.points.extend(o3d.utility.Vector3dVector(static_lidar_geometry.points))
             dense_lidar.colors.extend(o3d.utility.Vector3dVector(static_lidar_geometry.colors))
 
+        
         return dense_lidar, Camera(camera_transform, camera_frustum_geometry, image_paths)
 
     def _get_previous_frame_paths(self, current_sample_index):
