@@ -72,7 +72,7 @@ def main(args):
     nusc_can = NuScenesCanBus(dataroot=args.dataset_root)
     class_to_colour = {}
     dataset = shelve.open("occupancy.dataset", flag="n")
-    metadata = dict(
+    dataset["metadata"] = dict(
         voxel_size=args.voxel_size,
         grid_width=OCCUPANCY_GRID_WIDTH,
         grid_height=OCCUPANCY_GRID_HEIGHT,
@@ -80,11 +80,8 @@ def main(args):
         num_width_voxels=round(OCCUPANCY_GRID_WIDTH / args.voxel_size),
         num_height_voxels=round(OCCUPANCY_GRID_HEIGHT / args.voxel_size),
         num_depth_voxels=round(OCCUPANCY_GRID_DEPTH/ args.voxel_size),
-        length=0,
-        grid_index_order= "XZY"
+        length=0
     )
-
-    dataset["metadata"] = metadata
 
     for index, name in nusc.lidarseg_idx2name_mapping.items():
         colour = nusc.colormap[name]
