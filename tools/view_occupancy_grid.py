@@ -8,8 +8,6 @@ import numpy as np
 import open3d as o3d
 from python_input import Input
 
-from src.visualisation import Visualizer
-
 parser = ArgumentParser()
 parser.add_argument("occupancy_path")
 
