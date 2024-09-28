@@ -8,7 +8,7 @@ import open3d as o3d
 from pyquaternion import Quaternion
 
 from src.utils import (
-    Transform, CarTrajectory, TimestmapData, rotate_2d_vector, generate_frustum_from_camera_extrinsics, 
+    Transform, CarTrajectory, TimestampData, rotate_2d_vector, generate_frustum_from_camera_extrinsics, 
     create_lidar_geometries, generate_box_pointclouds, Camera
 )
 
@@ -40,8 +40,13 @@ class DenseLidarGenerator:
         self.current_index = 0
         self.load_samples()
 
-        pose = nusc_can.get_messages(scene["name"], 'pose')
-        self.pose_dataset = TimestmapData(pose, [p["utime"] for p in pose])
+        try:
+            pose = nusc_can.get_messages(scene["name"], 'pose')
+            self.pose_dataset = TimestampData(pose, [p["utime"] for p in pose])
+        except:
+            #CAN data does not exist for scene
+            self.pose_dataset = None
+
         self.length = len(self.samples) - self.num_future_samples - self.num_video_frames
     
     def load_samples(self) -> None:
@@ -120,14 +125,15 @@ class DenseLidarGenerator:
             lidar_extrinsics = self.nusc.get('calibrated_sensor', lidar['calibrated_sensor_token'])
             lidar_origin = np.array(lidar_extrinsics['translation'])
             box_detections = self.nusc.get_boxes(lidar_token)
-            pcd_path = self.nusc.get_sample_data_path(lidar_token)
-            pcd_labels_path = os.path.join(self.nusc.dataroot, f"lidarseg/{self.nusc.version}", lidar_token + '_lidarseg.bin')
             ego = self.nusc.get("ego_pose", lidar_token)
             car_world_position = ego["translation"]
             car_rotation = Quaternion(ego["rotation"])
-            can_pose_at_timestamp = self.pose_dataset.get_data_at_timestamp(lidar["timestamp"])
 
-            car_trajectory.update(can_pose_at_timestamp)
+            if(self.pose_dataset is not None):
+                can_pose_at_timestamp = self.pose_dataset.get_data_at_timestamp(lidar["timestamp"])
+                car_trajectory.update(can_pose_at_timestamp["pos"])
+            else:
+                car_trajectory.update(car_world_position)
 
             car_local_position = car_trajectory.position.copy()
             car_local_position[0], car_local_position[1] = rotate_2d_vector(car_local_position[0], car_local_position[1], radians(-90)) #No idea why it needs rotating -90 degrees, maybe because car forward is actually X not Y?

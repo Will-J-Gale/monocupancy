@@ -15,19 +15,19 @@ class CarTrajectory:
         self.position = np.array([0.0, 0.0, 0], dtype=np.float64)
         self.rotation = np.array([0, 0, 0, 0], dtype=np.float64)
         self.velocity = np.array([0, 0, 0], dtype=np.float64)
-        self.prev_car_ego = None
+        self.prev_car_position = None
     
-    def update(self, pose):
-        if(self.prev_car_ego is not None):
-            current_pos = np.array(pose["pos"])
-            prev_pos = np.array(self.prev_car_ego["pos"])
+    def update(self, position):
+        if(self.prev_car_position is not None):
+            current_pos = np.array(position)
+            prev_pos = np.array(self.prev_car_position)
 
             self.velocity = prev_pos - current_pos
             self.position += self.velocity
 
-        self.prev_car_ego = pose
+        self.prev_car_position = np.array(position)
 
-class TimestmapData:
+class TimestampData:
     def __init__(self, data:list, timestamps:list):
         assert len(data) == len(timestamps)
         self.data = data
