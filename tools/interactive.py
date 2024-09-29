@@ -1,14 +1,13 @@
 import os
 import sys
 from argparse import ArgumentParser
+import shelve
 sys.path.append(os.path.dirname(os.path.dirname(__file__))) #Add parent folder to path
 
-from nuscenes import NuScenes
-from nuscenes.can_bus.can_bus_api import NuScenesCanBus
 from python_input import Input
 
 from src.visualisation import Visualizer
-from src.utils import Frustum, generate_camera_view_occupancy
+from src.utils import generate_camera_view_occupancy
 from src.dense_lidar_generator import DenseLidarGenerator
 from src.constants import (
     STATIC_OBJECT_IDS, NUM_BOX_CLOUD_POINTS, OCCUPANCY_GRID_WIDTH,
@@ -17,27 +16,19 @@ from src.constants import (
 )
 
 parser = ArgumentParser()
-parser.add_argument("--dataset_root", default="/media/storage/datasets/nuscenes-v1.0-mini")
-parser.add_argument("--scene_index", type=int, default=0)
+parser.add_argument("--dataset", default="./nuscenes_simplified.dataset")
+parser.add_argument("--scene", type=int, default=0)
 parser.add_argument("--voxel_size", type=float, default=DEFAULT_VOXEL_SIZE)
 parser.add_argument("--show_image", action='store_true')
-parser.add_argument("--dataset_version", default="v1.0-mini")
 
 def main(args):
     inp = Input()
 
-    nusc = NuScenes(version=args.dataset_version, dataroot=args.dataset_root, verbose=False)
-    nusc_can = NuScenesCanBus(dataroot=args.dataset_root)
-    colourmap = {}
+    nuscenes_data = shelve.open(args.dataset, flag="r")
+    colourmap = nuscenes_data["class_to_colour"]
 
-    for index, name in nusc.lidarseg_idx2name_mapping.items():
-        colour = nusc.colormap[name]
-        colourmap[index] = colour
-    
     lidar_generator = DenseLidarGenerator(
-        nusc,
-        nusc_can,
-        nusc.scene[args.scene_index],
+        nuscenes_data[str(args.scene)],
         NUM_FUTURE_SAMPLES,
         NUM_VIDEO_FRAMES,
         colourmap,

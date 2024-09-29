@@ -1,6 +1,6 @@
 import os
 from math import radians
-from typing import Tuple
+from typing import Tuple, List
 from concurrent.futures import ProcessPoolExecutor, Future
 
 import numpy as np
@@ -8,55 +8,33 @@ import open3d as o3d
 from pyquaternion import Quaternion
 
 from src.utils import (
-    Transform, CarTrajectory, TimestampData, rotate_2d_vector, generate_frustum_from_camera_extrinsics, 
-    create_lidar_geometries, generate_box_pointclouds, Camera
+    Transform, CarTrajectory, rotate_2d_vector, generate_frustum_from_camera_extrinsics, 
+    create_lidar_geometries, generate_box_pointclouds, Camera, dict_to_box
 )
 
 class DenseLidarGenerator:
     def __init__(
             self, 
-            nusc, 
-            nusc_can, 
-            scene:dict, 
+            scene_samples:List[dict], 
             num_future_samples:int,
             num_video_frames:int,
             colourmap:dict,
             static_object_ids:list,
             num_box_cloud_points:int,
             frustum_distance:float):
-        self.nusc = nusc
-        self.nusc_can = nusc_can
-        self.scene = scene
+        self.samples = scene_samples
         self.num_video_frames = num_video_frames
         self.num_future_samples = num_future_samples
         self.colourmap = colourmap
         self.static_object_ids = static_object_ids
         self.num_box_cloud_points = num_box_cloud_points
         self.frustum_distance = frustum_distance
-        self.total_samples = scene["nbr_samples"]
-        self.samples = []
         self.lidar_cache = {}
         self.sample_offset = num_video_frames - 1
         self.current_index = 0
-        self.load_samples()
 
-        try:
-            pose = nusc_can.get_messages(scene["name"], 'pose')
-            self.pose_dataset = TimestampData(pose, [p["utime"] for p in pose])
-        except:
-            #CAN data does not exist for scene
-            self.pose_dataset = None
-
-        self.length = len(self.samples) - self.num_future_samples - self.num_video_frames
+        self.length = len(scene_samples) - self.num_future_samples - self.num_video_frames
     
-    def load_samples(self) -> None:
-        sample = self.nusc.get("sample", self.scene["first_sample_token"])
-        self.samples.append(sample)
-
-        while(sample["next"] != str()):
-            sample = self.nusc.get("sample", sample["next"])
-            self.samples.append(sample)
-
     def __len__(self):
         return self.length
 
@@ -73,15 +51,14 @@ class DenseLidarGenerator:
         return return_value
 
     def __getitem__(self, index:int) -> Tuple[o3d.geometry.PointCloud, Camera]:
-        car_trajectory = CarTrajectory()
-        dense_lidar = o3d.geometry.PointCloud()
-        
         start = self.sample_offset + index
         end = start + self.num_future_samples
 
         if(start < 0 or end >= len(self.samples)):
             raise Exception(f"Index {index} out of range")
 
+        car_trajectory = CarTrajectory()
+        dense_lidar = o3d.geometry.PointCloud()
         current_sample = self.samples[start]
         camera_transform = None
         camera_frustum_geometry = None
@@ -91,16 +68,16 @@ class DenseLidarGenerator:
         
         with ProcessPoolExecutor(max_workers=16) as executor:
             for i in range(start, end):
+                #@TODO Lidar cache isn't actually used...
                 sample = self.samples[i]
+                pcd_path = sample["lidar_pcd_path"]
+                pcd_labels_path = sample["lidar_pcd_labels_path"]
 
-                if(sample["token"] not in self.lidar_cache):
-                    lidar_token = sample['data']['LIDAR_TOP']
-                    pcd_path = self.nusc.get_sample_data_path(lidar_token)
-                    pcd_labels_path = os.path.join(self.nusc.dataroot, f"lidarseg/{self.nusc.version}", lidar_token + '_lidarseg.bin')
+                if(pcd_path not in self.lidar_cache):
                     future = executor.submit(create_lidar_geometries, pcd_path, pcd_labels_path, self.colourmap.copy(), self.static_object_ids.copy())
                     lidar_futures.append((sample, future))
                 else:
-                    lidar_futures.append((sample, self.lidar_cache[sample["token"]]))
+                    lidar_futures.append((sample, self.lidar_cache[pcd_path]))
 
         for sample, data in lidar_futures:
             if(isinstance(data, Future)):
@@ -118,19 +95,16 @@ class DenseLidarGenerator:
             dynamic_lidar_geometry.points = o3d.utility.Vector3dVector(dynamic_points)
             dynamic_lidar_geometry.colors = o3d.utility.Vector3dVector(dynamic_colours)
             
-            lidar_token = sample['data']['LIDAR_TOP']
-            lidar = self.nusc.get('sample_data', lidar_token)
-            cam_front = self.nusc.get('sample_data', sample['data']['CAM_FRONT'])
-            cam_front_extrinsics = self.nusc.get('calibrated_sensor', cam_front['calibrated_sensor_token'])
-            lidar_extrinsics = self.nusc.get('calibrated_sensor', lidar['calibrated_sensor_token'])
-            lidar_origin = np.array(lidar_extrinsics['translation'])
-            box_detections = self.nusc.get_boxes(lidar_token)
-            ego = self.nusc.get("ego_pose", lidar_token)
-            car_world_position = ego["translation"]
-            car_rotation = Quaternion(ego["rotation"])
+            cam_front_extrinsics = sample["cam_front_extrinsics"]
+            lidar_origin = np.array(sample["lidar_origin"])
+            box_detections = [dict_to_box(box_dict) for box_dict in sample["box_detections"]]
+            car_world_position = sample["car_world_position"]
+            car_rotation = Quaternion(sample["car_rotation"])
+            can_pose_at_timestamp = sample["can_pose_at_timestamp"]
+            image_width = sample["image_width"]
+            image_height = sample["image_height"]
 
-            if(self.pose_dataset is not None):
-                can_pose_at_timestamp = self.pose_dataset.get_data_at_timestamp(lidar["timestamp"])
+            if(can_pose_at_timestamp is not None):
                 car_trajectory.update(can_pose_at_timestamp["pos"])
             else:
                 car_trajectory.update(car_world_position)
@@ -155,7 +129,7 @@ class DenseLidarGenerator:
                     dense_lidar.points.extend(box_cloud.points)
                     dense_lidar.colors.extend(box_cloud.colors)
 
-                camera_frustum_geometry = generate_frustum_from_camera_extrinsics(cam_front_extrinsics, car_rotation, cam_front["width"], cam_front["height"], self.frustum_distance)
+                camera_frustum_geometry = generate_frustum_from_camera_extrinsics(cam_front_extrinsics, car_rotation, image_width, image_height, self.frustum_distance)
                 camera_frustum_geometry.translate(car_local_position)
 
             dense_lidar.points.extend(o3d.utility.Vector3dVector(static_lidar_geometry.points))
@@ -171,8 +145,6 @@ class DenseLidarGenerator:
 
         for i in range(start, end):
             sample = self.samples[i]
-            cam_front = self.nusc.get('sample_data', sample['data']['CAM_FRONT'])
-            image_path = os.path.join(self.nusc.dataroot, cam_front["filename"])
-            image_paths.append(image_path)
+            image_paths.append(sample["image_path"])
             
         return image_paths

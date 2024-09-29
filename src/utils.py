@@ -2,8 +2,9 @@ from math import sin, cos, radians
 
 import numpy as np
 import open3d as o3d
-from open3d.geometry import get_rotation_matrix_from_xyz
 from pyquaternion import Quaternion
+from nuscenes.utils.data_classes import Box
+from open3d.geometry import get_rotation_matrix_from_xyz
 
 class Transform:
     def __init__(self, position, rotation):
@@ -310,3 +311,23 @@ def occupancy_grid_to_list(occupancy_grid:o3d.geometry.VoxelGrid):
         colours.append(list(voxel.color))
 
     return grid_points, colours
+
+def box_to_dict(box):
+    return dict(
+        center = list(box.center),
+        size = list(box.wlh),
+        rotation_matrix = box.rotation_matrix,
+        label = box.label,
+        score = box.score,
+        name = box.name,
+        token = box.token,
+    )
+
+def dict_to_box(box_dict):
+    return Box(
+        box_dict["center"],
+        box_dict["size"],
+        Quaternion(matrix=box_dict["rotation_matrix"]),
+        box_dict["label"],
+        box_dict["score"]
+    )
