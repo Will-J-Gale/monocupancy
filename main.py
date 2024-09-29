@@ -3,8 +3,6 @@ from typing import List
 from shelve import DbfilenameShelf
 from argparse import ArgumentParser
 
-from nuscenes import NuScenes
-from nuscenes.can_bus.can_bus_api import NuScenesCanBus
 from tqdm import tqdm
 
 from src.utils import generate_camera_view_occupancy, occupancy_grid_to_list
