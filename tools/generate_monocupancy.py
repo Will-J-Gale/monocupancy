@@ -1,3 +1,6 @@
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import shelve
 from typing import List
 from shelve import DbfilenameShelf
