@@ -13,6 +13,7 @@ from src.utils import TimestampData, box_to_dict
 parser = ArgumentParser()
 parser.add_argument("--dataset_root", default="/media/storage/datasets/nuscenes")
 parser.add_argument("--dataset_version", default="v1.0-trainval")
+parser.add_argument("--output_filename", default=None)
 
 def main(args):
     nusc = NuScenes(version=args.dataset_version, dataroot=args.dataset_root, verbose=False)
@@ -24,7 +25,8 @@ def main(args):
         colour = nusc.colormap[name]
         class_to_colour[index] = colour
 
-    nuscenes_simplified = shelve.open("nuscenes_simplified.dataset", "n")
+    output_filename = args.output_filename if args.output_filename is not None else f"{args.dataset_version}.dataset"
+    nuscenes_simplified = shelve.open(output_filename, "n")
     nuscenes_simplified["class_to_colour"] = class_to_colour
     nuscenes_simplified["num_scenes"] = num_scenes
 
@@ -57,7 +59,7 @@ def main(args):
             data["lidar_pcd_labels_path"] = os.path.join(nusc.dataroot, f"lidarseg/{nusc.version}", lidar_token + '_lidarseg.bin')
             data["image_width"] = cam_front["width"]
             data["image_height"] = cam_front["height"]
-            data["cam_front_extrinsics"] = nusc.get('calibrated_sensor', cam_front['calibrated_sensor_token']);
+            data["cam_front_extrinsics"] = nusc.get('calibrated_sensor', cam_front['calibrated_sensor_token'])
             data["image_path"] = os.path.join(nusc.dataroot, cam_front["filename"])
             data["car_world_position"] = ego_pose["translation"]
             data["car_rotation"] = ego_pose["rotation"]
