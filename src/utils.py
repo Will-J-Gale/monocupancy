@@ -1,3 +1,4 @@
+import os
 from math import sin, cos, radians
 
 import numpy as np
@@ -5,6 +6,8 @@ import open3d as o3d
 from pyquaternion import Quaternion
 from nuscenes.utils.data_classes import Box
 from open3d.geometry import get_rotation_matrix_from_xyz
+
+from constants import UNLABELLED_DATA_CLASS
 
 class Transform:
     def __init__(self, position, rotation):
@@ -162,7 +165,11 @@ def create_frustum_geometry_at_origin(hfov_radians, vfov_radians, distance):
     return line_set
 
 def create_lidar_geometries(pcd_path, label_path, colourmap, static_object_ids):
-    pcd_labels = np.fromfile(label_path, dtype=np.uint8)
+    if(os.path.exists(label_path)):
+        pcd_labels = np.fromfile(label_path, dtype=np.uint8)
+    else:
+        pcd_labels = None
+
     point_cloud_raw = np.fromfile(pcd_path, dtype=np.float32).reshape(-1, 5)
     point_cloud_raw = point_cloud_raw[..., 0:3]
 
@@ -173,14 +180,19 @@ def create_lidar_geometries(pcd_path, label_path, colourmap, static_object_ids):
 
     for i in range(len(point_cloud_raw)):
         point = point_cloud_raw[i]
-        label = pcd_labels[i]
+        if(pcd_labels is not None):
+            label = pcd_labels[i]
 
-        if(label in static_object_ids):
-            static_points.append(point)
-            static_labels.append(label)
+            if(label in static_object_ids):
+                static_points.append(point)
+                static_labels.append(label)
+            else:
+                dynamic_points.append(point)
+                dynamic_labels.append(label)
+
         else:
-            dynamic_points.append(point)
-            dynamic_labels.append(label)
+            static_points.append(point)
+            static_labels.append(UNLABELLED_DATA_CLASS)
 
     static_colours = [colourmap[label] for label in static_labels]
     dynamic_colours = [colourmap[label] for label in dynamic_labels]
