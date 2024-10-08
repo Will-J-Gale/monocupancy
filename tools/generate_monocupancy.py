@@ -21,7 +21,6 @@ parser.add_argument("--nuscenes_dataset", default="nuscenes_simplified.dataset")
 parser.add_argument("--output_path", default="occupancy.dataset")
 parser.add_argument("--voxel_size", type=float, default=DEFAULT_VOXEL_SIZE)
 parser.add_argument("--num_video_frames", type=int, default=NUM_VIDEO_FRAMES)
-parser.add_argument("--output_dir", default=".")
 
 def process_scene(
         scene_samples:List[dict], 
@@ -63,6 +62,8 @@ def process_scene(
         dataset_file[str(index)] = data
 
         metadata["length"] = index + 1
+        metadata["num_occupied"] += len(occupancy_points_list)
+        metadata["num_not_occupied"] +=  - len(occupancy_grid_to_list)
         dataset_file["metadata"] = metadata
 
 def main(args):
@@ -79,7 +80,9 @@ def main(args):
         num_width_voxels=round(OCCUPANCY_GRID_WIDTH / args.voxel_size),
         num_height_voxels=round(OCCUPANCY_GRID_HEIGHT / args.voxel_size),
         num_depth_voxels=round(OCCUPANCY_GRID_DEPTH/ args.voxel_size),
-        length=0
+        length=0,
+        num_occupied=0,
+        num_not_occupied=0,
     )
     
     try:
