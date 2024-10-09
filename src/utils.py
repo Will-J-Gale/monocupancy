@@ -7,7 +7,7 @@ from pyquaternion import Quaternion
 from nuscenes.utils.data_classes import Box
 from open3d.geometry import get_rotation_matrix_from_xyz
 
-from constants import UNLABELLED_DATA_CLASS
+from src.constants import UNLABELLED_DATA_CLASS
 
 class Transform:
     def __init__(self, position, rotation):
