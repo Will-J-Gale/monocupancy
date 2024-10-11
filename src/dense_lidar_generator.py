@@ -64,6 +64,7 @@ class DenseLidarGenerator:
         camera_frustum_geometry = None
         lidar_futures = []
         lidar_batch = []
+        labels = []
         image_paths = self._get_previous_frame_paths(start)
         
         with ProcessPoolExecutor(max_workers=16) as executor:
@@ -85,7 +86,7 @@ class DenseLidarGenerator:
             else:
                 lidar_batch.append((sample, data))
 
-        for sample, (dynamic_points, dynamic_colours, static_points, static_colours) in lidar_batch:
+        for sample, (dynamic_points, dynamic_colours, dynamic_labels, static_points, static_colours, static_labels) in lidar_batch:
             # Creating points using Vector3dVector takes ~400ms but cannot be cached because of the later translations
             # it requires a different translation each time
             static_lidar_geometry = o3d.geometry.PointCloud()
@@ -124,6 +125,7 @@ class DenseLidarGenerator:
                 dynamic_lidar_geometry.translate(car_local_position, relative=True) 
                 dense_lidar.points.extend(o3d.utility.Vector3dVector(dynamic_lidar_geometry.points))
                 dense_lidar.colors.extend(o3d.utility.Vector3dVector(dynamic_lidar_geometry.colors))
+                labels.extend(dynamic_labels)
 
                 for box_cloud in  generate_box_pointclouds(box_detections, car_world_position, car_local_position, self.num_box_cloud_points):
                     dense_lidar.points.extend(box_cloud.points)
@@ -134,9 +136,10 @@ class DenseLidarGenerator:
 
             dense_lidar.points.extend(o3d.utility.Vector3dVector(static_lidar_geometry.points))
             dense_lidar.colors.extend(o3d.utility.Vector3dVector(static_lidar_geometry.colors))
+            labels.extend(static_labels)
 
         
-        return dense_lidar, Camera(camera_transform, camera_frustum_geometry, image_paths)
+        return dense_lidar, labels, Camera(camera_transform, camera_frustum_geometry, image_paths)
 
     def _get_previous_frame_paths(self, current_sample_index):
         end = current_sample_index + 1

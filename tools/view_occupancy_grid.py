@@ -6,6 +6,8 @@ from argparse import ArgumentParser
 
 import numpy as np
 import open3d as o3d
+import open3d.visualization.gui as gui
+import open3d.visualization.rendering as rendering
 from python_input import Input
 
 parser = ArgumentParser()
@@ -17,45 +19,75 @@ OCCUPANCY_GRID_DEPTH = 35
 OCCUPANCY_GRID_HEIGHT = 10
 UPDATE_CAMERA = True
 
-def load_occupancy_grid(
-        occupancy_data:dict, 
-        vis:o3d.visualization.Visualizer(),
-        voxel_size:float,
-        grid_width:int,
-        grid_height:int,
-        grid_depth:int):
+DEFAULT_MATERIAL = rendering.MaterialRecord()
+DEFAULT_MATERIAL.base_color = [1.0, 1.0, 1.0, 1]
+DEFAULT_MATERIAL.shader = "defaultLit"
+
+def create_window(name, width=1920//2, height=1080, x=0, y=0):
+    window = gui.Application.instance.create_window(name, width, height, x, y)
+    scene_widget = gui.SceneWidget()
+    scene = rendering.Open3DScene(window.renderer)
+    scene.set_background([0, 0, 0, 255])
+    scene_widget.scene = scene
+    window.add_child(scene_widget)
+    bbox = o3d.geometry.AxisAlignedBoundingBox([0, 0, 0], [20, 20, 20])
+    scene_widget.setup_camera(60, bbox, [0, 0, 0])
+    
+    material = rendering.MaterialRecord()
+    material.base_color = [1.0, 1.0, 1.0, 1]
+    material.shader = "defaultLit"
+
+    scene_widget.scene.scene.enable_sun_light(True)
+    scene.camera.look_at([12, 25, 0], [12, -12, 15], [0, 1, 0])
+
+    return scene
+
+def load_occupancy_grid(occupancy_data:dict, voxel_grid:o3d.geometry.VoxelGrid):
     global UPDATE_CAMERA
-    voxel_grid = o3d.geometry.VoxelGrid().create_dense([0, 0, 0], [0, 0, 0], voxel_size, grid_width, grid_depth, grid_height)
     [voxel_grid.remove_voxel(voxel.grid_index) for voxel in voxel_grid.get_voxels()]
 
-    for point, colour in zip(occupancy_data["occupancy"], occupancy_data["occupancy_colours"]):
+    occupancy_grid_file = np.load(occupancy_data["occupancy_path"])
+    occopancy_indicies = occupancy_grid_file["occupancy_indicies"]
+    occupancy_colours = occupancy_grid_file["occupancy_labels"]
+
+    for point, colour in zip(occopancy_indicies, occupancy_colours):
+        colour = np.array(colour) / 255
         voxel_grid.add_voxel(o3d.geometry.Voxel(point, colour))
 
-    vis.add_geometry(voxel_grid, UPDATE_CAMERA)
     UPDATE_CAMERA = False
 
 def main(args):
     inp = Input()
-    vis = o3d.visualization.Visualizer()
-    vis.create_window( "Occupancy", 1920//2, 1080, 0, 0)
-    vis.get_render_option().background_color = np.asarray([0, 0, 0])
+    gui.Application.instance.initialize()
+    vis = create_window("Target", width=1920//2, height=1080, x=0, y=0)
+    # vis = o3d.visualization.Visualizer()
+    # vis.create_window("Occupancy", 1920//2, 1080, 0, 0)
+    # vis.get_render_option().background_color = np.asarray([0, 0, 0])
     index = 0
 
     dataset = shelve.open(args.occupancy_path, "r")
     metadata = dataset["metadata"]
     dataset_length = metadata["length"]
 
+    voxel_grid = o3d.geometry.VoxelGrid().create_dense(
+        [0, 0, 0], 
+        [0, 0, 0], 
+        metadata["voxel_size"], 
+        metadata["grid_width"], 
+        metadata["grid_depth"], 
+        metadata["grid_height"]
+    )
+    [voxel_grid.remove_voxel(voxel.grid_index) for voxel in voxel_grid.get_voxels()]
+
     load_occupancy_grid(
         dataset[str(index)], 
-        vis,
-        metadata["voxel_size"],
-        metadata["grid_width"],
-        metadata["grid_height"],
-        metadata["grid_depth"],
+        voxel_grid 
     )
 
+    vis.add_geometry("voxels", voxel_grid, DEFAULT_MATERIAL)
+
     while(True):
-        if(not vis.poll_events() or inp.get_key_down("q")):
+        if(inp.get_key_down("q")):
             break
 
         if(inp.any_key_pressed()):
@@ -64,17 +96,15 @@ def main(args):
             elif(inp.get_key_down("a")):
                 index = max(index - 1, 0)
             
-            vis.clear_geometries()
             load_occupancy_grid(
                 dataset[str(index)], 
-                vis,
-                metadata["voxel_size"],
-                metadata["grid_width"],
-                metadata["grid_height"],
-                metadata["grid_depth"],
+                voxel_grid,
             )
+
+            vis.clear_geometry()
+            vis.add_geometry("voxels", voxel_grid, DEFAULT_MATERIAL)
             
-        vis.update_renderer()
+        gui.Application.instance.run_one_tick()
 
 if __name__ == "__main__":
     args = parser.parse_args()

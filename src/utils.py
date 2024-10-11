@@ -197,7 +197,7 @@ def create_lidar_geometries(pcd_path, label_path, colourmap, static_object_ids):
     static_colours = [colourmap[label] for label in static_labels]
     dynamic_colours = [colourmap[label] for label in dynamic_labels]
 
-    return dynamic_points, dynamic_colours, static_points, static_colours
+    return dynamic_points, dynamic_colours, dynamic_labels, static_points, static_colours, static_labels
 
 def generate_box_pointclouds(box_detections, car_global_position, car_relative_position, num_box_cloud_points=1000):
     box_clouds = []
@@ -343,3 +343,12 @@ def dict_to_box(box_dict):
         box_dict["label"],
         box_dict["score"]
     )
+
+def occupancy_indicies_to_numpy(occupancy_indexes, grid_shape):
+    occupancy = np.zeros(grid_shape, dtype=np.bool8)
+
+    for index in occupancy_indexes:
+        x, y, z = index
+        occupancy[x, z, y] = 1 #Why/What?!
+
+    return occupancy

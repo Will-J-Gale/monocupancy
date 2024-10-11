@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 
 import numpy as np
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 parser = ArgumentParser()
 parser.add_argument("dataset_path")
@@ -33,13 +34,45 @@ def main(args):
     not_occupied = 0
     occupied = 0
 
+    xs = {}
+    ys = {}
+    zs = {}
+
+    import time
     for i in tqdm(range(dataset_length)):
+        start = time.time()
         data = dataset[str(i)]
-        grid = generate_occupancy_grid(data, (num_width_voxels, num_height_voxels, num_depth_voxels))
-        occupied += np.count_nonzero(grid == 1.0)
-        not_occupied += np.count_nonzero(grid == 0.0)
-    
-    print(not_occupied, occupied)
+        # grid = generate_occupancy_grid(data, (num_width_voxels, num_height_voxels, num_depth_voxels))
+        # occupied += np.count_nonzero(grid == 1.0)
+        # not_occupied += np.count_nonzero(grid == 0.0)
+
+        # for index in data["occupancy"]:
+        #     x, y, z = index
+
+            # if(x not in xs):
+            #     xs[x] = 0
+            # if(y not in ys):
+            #     ys[y] = 0
+            # if(z not in zs):
+            #     zs[z] = 0
+            
+            # xs[x] += 1
+            # ys[y] += 1
+            # zs[z] += 1
+        
+        dt = time.time() - start
+        print(dt)
+        break
+
+    # plt.figure("X (left/right)")
+    # plt.bar(xs.keys(), xs.values())
+    # plt.figure("Y (forward/backward)")
+    # plt.bar(ys.keys(), ys.values())
+    # plt.figure("Z (up/down)")
+    # plt.bar(zs.keys(), zs.values())
+    # plt.show()
+
+    # print(not_occupied, occupied)
 
 if __name__ == "__main__":
     args = parser.parse_args()

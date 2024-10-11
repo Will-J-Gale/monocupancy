@@ -6,9 +6,10 @@ from typing import List
 from shelve import DbfilenameShelf
 from argparse import ArgumentParser
 
+import numpy as np
 from tqdm import tqdm
 
-from src.utils import generate_camera_view_occupancy, occupancy_grid_to_list
+from src.utils import generate_camera_view_occupancy, occupancy_grid_to_list, occupancy_indicies_to_numpy
 from src.dense_lidar_generator import DenseLidarGenerator
 from src.constants import (
     STATIC_OBJECT_IDS, NUM_BOX_CLOUD_POINTS, OCCUPANCY_GRID_WIDTH,
@@ -19,12 +20,14 @@ from src.constants import (
 parser = ArgumentParser()
 parser.add_argument("--nuscenes_dataset", default="nuscenes_simplified.dataset")
 parser.add_argument("--output_path", default="occupancy.dataset")
+parser.add_argument("--occupancy_data_output_dir", default="voxel_grids")
 parser.add_argument("--voxel_size", type=float, default=DEFAULT_VOXEL_SIZE)
 parser.add_argument("--num_video_frames", type=int, default=NUM_VIDEO_FRAMES)
 
 def process_scene(
         scene_samples:List[dict], 
         dataset_file:DbfilenameShelf,
+        occupancy_data_output_dir:str,
         class_to_colour:dict, 
         voxel_size:float, 
         num_video_frames:int):
@@ -39,7 +42,7 @@ def process_scene(
         FRUSTUM_DISTANCE
     )
 
-    for dense_lidar, camera in tqdm(lidar_generator, desc="Frame", leave=False):
+    for dense_lidar, labels, camera in tqdm(lidar_generator, desc="Frame", leave=False):
         occupancy = generate_camera_view_occupancy(
             dense_lidar, 
             camera.transform, 
@@ -50,26 +53,42 @@ def process_scene(
             camera
         )
 
-        occupancy_points_list, occupancy_colours = occupancy_grid_to_list(occupancy)
-        data = {
-            "image_paths": camera.image_paths,
-            "occupancy": occupancy_points_list,
-            "occupancy_colours": occupancy_colours
-        }
-
         metadata = dataset_file["metadata"]
         index = metadata["length"]
+
+        occupancy_points_list, occupancy_colours = occupancy_grid_to_list(occupancy)
+        occupancy_numpy = occupancy_indicies_to_numpy(
+            occupancy_points_list, 
+            (metadata["num_width_voxels"], metadata["num_height_voxels"], metadata["num_depth_voxels"])
+        )
+        occupancy_data_path = os.path.join(occupancy_data_output_dir, f"{index}.npz")
+        np.savez_compressed(
+            occupancy_data_path, 
+            occupancy_grid=occupancy_numpy,
+            occupancy_indicies=np.array(occupancy_points_list, dtype=np.uint8),
+            occupancy_colours=occupancy_colours,
+            occupancy_labels=np.array(labels, dtype=np.uint8)
+        )
+        data = {
+            "image_paths": camera.image_paths,
+            "occupancy_path": occupancy_data_path
+        }
         dataset_file[str(index)] = data
 
+        
+        total_voxels = metadata["num_width_voxels"] + metadata["num_height_voxels"] + metadata["num_depth_voxels"]
         metadata["length"] = index + 1
         metadata["num_occupied"] += len(occupancy_points_list)
-        metadata["num_not_occupied"] +=  - len(occupancy_grid_to_list)
+        metadata["num_not_occupied"] += total_voxels - len(occupancy_points_list)
         dataset_file["metadata"] = metadata
 
 def main(args):
     nuscenes_data = shelve.open(args.nuscenes_dataset, flag="r")
     class_to_colour = nuscenes_data["class_to_colour"]
     num_scenes = nuscenes_data["num_scenes"]
+
+    occupancy_data_output_dir = args.occupancy_data_output_dir
+    os.makedirs(occupancy_data_output_dir, exist_ok=True)
 
     dataset = shelve.open(args.output_path, flag="n")
     dataset["metadata"] = dict(
@@ -91,6 +110,7 @@ def main(args):
             process_scene(
                 scene_samples,
                 dataset,
+                occupancy_data_output_dir,
                 class_to_colour, 
                 args.voxel_size, 
                 args.num_video_frames, 

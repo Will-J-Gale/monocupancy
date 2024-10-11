@@ -38,7 +38,7 @@ def main(args):
     )
 
     index = 0
-    dense_lidar, camera = lidar_generator[index]
+    dense_lidar, _, camera = lidar_generator[index]
     occupancy_grid = generate_camera_view_occupancy(
         dense_lidar, 
         camera.transform, 
