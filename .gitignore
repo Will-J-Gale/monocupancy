@@ -4,3 +4,6 @@
 test/*
 *.pickle
 *.dataset
+
+**/runs/**
+**/weights*/*

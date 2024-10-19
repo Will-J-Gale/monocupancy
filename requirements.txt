@@ -1,0 +1,11 @@
+numpy
+nuscenes-devkit==1.1.11
+open3d
+opencv-python
+python-input
+pyquaternion
+torch
+torchaudio
+torchsummary
+torchvision
+tqdm
