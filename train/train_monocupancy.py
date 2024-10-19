@@ -158,15 +158,15 @@ def main(args):
             model.train()
             for train_X, train_Y in training_data:
                 predictions = model(train_X)
-                val_loss = loss_function(predictions, train_Y)
+                loss = loss_function(predictions, train_Y)
 
                 optimizer.zero_grad()
-                val_loss.backward()
+                loss.backward()
                 optimizer.step()
 
-                val_loss_value = val_loss.cpu().detach().numpy()
-                epoch_losses.append(val_loss_value)
-                writer.add_scalar("training_loss", val_loss_value, step)
+                loss_value = loss.cpu().detach().numpy()
+                epoch_losses.append(loss_value)
+                writer.add_scalar("training_loss", loss_value, step)
                 step += 1
                 epoch_progress.postfix = np.mean(epoch_losses)
                 epoch_progress.update()
@@ -182,9 +182,9 @@ def main(args):
             model.eval()
             val_losses = []
             with torch.no_grad():
-                for train_X, train_Y in tqdm(val_dataset, desc="validation", leave=False):
-                    predictions = model(train_X)
-                    val_loss = loss_function(predictions, train_Y)
+                for val_X, val_Y in tqdm(val_dataset, desc="validation", leave=False):
+                    predictions = model(val_X)
+                    val_loss = loss_function(predictions, val_Y)
 
                     val_loss_value = val_loss.cpu().detach().numpy()
                     val_losses.append(val_loss_value)
