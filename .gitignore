@@ -5,5 +5,5 @@ test/*
 *.pickle
 *.dataset
 
-**/runs/**
+**/logs/**
 **/weights*/*
