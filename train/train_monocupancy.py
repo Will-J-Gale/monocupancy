@@ -176,9 +176,6 @@ def main(args):
             avg_epoch_loss = np.mean(epoch_losses)
             writer.add_scalar("epoch_training_loss", avg_epoch_loss, epoch)
 
-            model_filename = f"{model_name}_{epoch}_{avg_epoch_loss:.5f}.weights"
-            torch.save(model.state_dict(), os.path.join(weights_dir, model_filename))
-
             model.eval()
             val_losses = []
             with torch.no_grad():
@@ -189,7 +186,10 @@ def main(args):
                     val_loss_value = val_loss.cpu().detach().numpy()
                     val_losses.append(val_loss_value)
 
-            writer.add_scalar("validation_loss", np.mean(val_losses), epoch)
+            avg_val_loss = np.mean(val_losses)
+            writer.add_scalar("validation_loss", avg_val_loss, epoch)
+            model_filename = f"{model_name}_{epoch}_{avg_val_loss:.5f}.weights"
+            torch.save(model.state_dict(), os.path.join(weights_dir, model_filename))
 
     except KeyboardInterrupt:
         print("Interrupted, closing")
