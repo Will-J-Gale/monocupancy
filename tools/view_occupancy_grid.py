@@ -48,7 +48,7 @@ def load_occupancy_grid(occupancy_data:dict, voxel_grid:o3d.geometry.VoxelGrid):
 
     occupancy_grid_file = np.load(occupancy_data["occupancy_path"])
     occopancy_indicies = occupancy_grid_file["occupancy_indicies"]
-    occupancy_colours = occupancy_grid_file["occupancy_labels"]
+    occupancy_colours = occupancy_grid_file["occupancy_colours"]
 
     for point, colour in zip(occopancy_indicies, occupancy_colours):
         colour = np.array(colour) / 255
@@ -86,6 +86,9 @@ def main(args):
 
     vis.add_geometry("voxels", voxel_grid, DEFAULT_MATERIAL)
 
+    origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=10, origin=[0, 0, 0]) 
+    vis.add_geometry("origin", origin, DEFAULT_MATERIAL)
+
     while(True):
         if(inp.get_key_down("q")):
             break
@@ -103,6 +106,7 @@ def main(args):
 
             vis.clear_geometry()
             vis.add_geometry("voxels", voxel_grid, DEFAULT_MATERIAL)
+            vis.add_geometry("origin", origin, DEFAULT_MATERIAL)
             
         gui.Application.instance.run_one_tick()
 
