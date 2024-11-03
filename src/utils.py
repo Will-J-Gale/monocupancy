@@ -7,7 +7,7 @@ from pyquaternion import Quaternion
 from nuscenes.utils.data_classes import Box
 from open3d.geometry import get_rotation_matrix_from_xyz
 
-from src.constants import UNLABELLED_DATA_CLASS
+from src.constants import UNLABELLED_DATA_CLASS, GROUND_CLEARANCE
 
 class Transform:
     def __init__(self, position, rotation):
@@ -228,7 +228,7 @@ def generate_box_pointclouds(box_detections, car_global_position, car_relative_p
 
     return box_clouds
 
-def generate_frustum_from_camera_extrinsics(cam_extrinsics:dict, rotation:Quaternion, image_width:int, image_height:int, distance=100):
+def generate_frustum_from_camera_extrinsics(cam_extrinsics:dict, position:np.array, rotation:Quaternion, image_width:int, image_height:int, distance=100):
     fx = cam_extrinsics["camera_intrinsic"][0][0]
     fy = cam_extrinsics["camera_intrinsic"][1][1]
 
@@ -236,7 +236,7 @@ def generate_frustum_from_camera_extrinsics(cam_extrinsics:dict, rotation:Quater
     cam_vfov = 2 * np.arctan2(image_height, 2 * fy)
 
     frustum = create_frustum_geometry(
-        cam_extrinsics["translation"], 
+        position,
         Quaternion(rotation).rotation_matrix,
         cam_hfov,
         cam_vfov,
@@ -272,47 +272,62 @@ def generate_boxes_meshes(boxes, car_global_position, car_relative_position):
 
     return box_meshes
 
+class OccupancyResult:
+    def __init__(
+            self, 
+            occupancy_grid, 
+            cropped_points,
+            occupancy_box_origin,
+            occupancy_box_car,
+            frustum_origin):
+        
+        self.occupancy_grid = occupancy_grid
+        self.cropped_points = cropped_points
+        self.occupancy_box_origin = occupancy_box_origin
+        self.occupancy_box_car = occupancy_box_car
+        self.frustum_origin = frustum_origin
+
 def generate_camera_view_occupancy(
         dense_pointcloud:o3d.geometry.PointCloud, 
         car_transform:Transform,
         x_scale:float, 
         y_scale:float, 
         z_scale:float,
-        voxel_size:float,
-        camera:Camera):
+        camera:Camera,
+        voxel_grid_template:o3d.geometry.VoxelGrid):
 
-    frustum = Frustum(camera.frustum_geometry.points)
     half_y = y_scale / 2
     half_z = z_scale / 2
 
-    occupancy_box_pos = car_transform.position + np.array([0, half_y, half_z])
+    occupancy_box_pos = car_transform.position + np.array([0, half_y, half_z - GROUND_CLEARANCE])
     occupancy_box = o3d.geometry.OrientedBoundingBox(occupancy_box_pos, np.eye(3), (x_scale, y_scale, z_scale))
     occupancy_box.rotate(car_transform.rotation.rotation_matrix, car_transform.position)
-    occupancy_box.color = (1.0, 1.0, 0.0)
+    occupancy_box.color = (1.0, 1.0, 0.0) #TODO Magic tuple
 
     cropped_points = dense_pointcloud.crop(occupancy_box)
-    frustum_cropped_points = o3d.geometry.PointCloud()
+    cropped_points.rotate(car_transform.rotation.inverse.rotation_matrix, [0, 0, 0])
 
-    for point, color in zip(cropped_points.points, cropped_points.colors):
+    frustum_geometry = o3d.geometry.LineSet(camera.frustum_geometry)
+    frustum_geometry.rotate(car_transform.rotation.inverse.rotation_matrix, [0, 0, 0])
+    frustum = Frustum(frustum_geometry.points)
+
+    occupancy_grid = o3d.geometry.VoxelGrid(voxel_grid_template)
+
+    for point, colour in zip(cropped_points.points, cropped_points.colors):
         if(frustum.contains_point(point)):
-            frustum_cropped_points.points.append(point)
-            frustum_cropped_points.colors.append(color)
+            voxel_index = occupancy_grid.get_voxel(point)
+            occupancy_grid.add_voxel(o3d.geometry.Voxel(voxel_index, colour))
 
-    frustum_cropped_points.rotate(car_transform.rotation.inverse.rotation_matrix, car_transform.position)
-    frustum_cropped_points.translate(-occupancy_box_pos, True)
-    frustum_cropped_points.translate([0, half_y, half_z], True)
-    occupancy_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(frustum_cropped_points, voxel_size=voxel_size)
+    occupancy_box_origin = o3d.geometry.OrientedBoundingBox(occupancy_box)
+    occupancy_box_origin.rotate(car_transform.rotation.inverse.rotation_matrix, [0, 0, 0])
 
-    max_x = x_scale / voxel_size
-    max_y = y_scale / voxel_size
-    max_z = z_scale / voxel_size
-
-    for voxel in occupancy_grid.get_voxels():
-        x, y, z = voxel.grid_index
-        if(x < 0 or x >= max_x or y < 0 or y >= max_y or z < 0 or z >= max_z):
-            occupancy_grid.remove_voxel(voxel.grid_index)
-
-    return occupancy_grid
+    return OccupancyResult(
+        occupancy_grid, 
+        cropped_points,
+        occupancy_box_origin,
+        occupancy_box,
+        frustum_geometry
+    )
 
 def occupancy_grid_to_list(occupancy_grid:o3d.geometry.VoxelGrid):
     #Grid is X, Z, Y???

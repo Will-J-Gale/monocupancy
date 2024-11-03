@@ -76,13 +76,15 @@ class DenseLidarGenerator:
 
                 if(pcd_path not in self.lidar_cache):
                     future = executor.submit(create_lidar_geometries, pcd_path, pcd_labels_path, self.colourmap.copy(), self.static_object_ids.copy())
-                    lidar_futures.append((sample, future))
+                    lidar_futures.append((sample, future, pcd_path))
                 else:
-                    lidar_futures.append((sample, self.lidar_cache[pcd_path]))
+                    lidar_futures.append((sample, self.lidar_cache[pcd_path], pcd_path))
 
-        for sample, data in lidar_futures:
+        for sample, data, pcd_path in lidar_futures:
             if(isinstance(data, Future)):
-                lidar_batch.append((sample, data.result()))
+                result = data.result()
+                lidar_batch.append((sample, result))
+                self.lidar_cache[pcd_path] = result
             else:
                 lidar_batch.append((sample, data))
 
@@ -117,7 +119,8 @@ class DenseLidarGenerator:
             static_lidar_geometry.translate(car_local_position, relative=True)
             
             if(sample == current_sample):
-                camera_pos = car_local_position + cam_front_extrinsics["translation"]
+                #Current sample always first sample! @TODO Move this out of the loop
+                camera_pos = car_local_position
                 camera_pos[2] = car_local_position[2]
                 camera_transform = Transform(camera_pos, car_rotation)
                 dynamic_lidar_geometry.rotate(car_rotation.rotation_matrix, [0,0,0])
@@ -131,14 +134,14 @@ class DenseLidarGenerator:
                     dense_lidar.points.extend(box_cloud.points)
                     dense_lidar.colors.extend(box_cloud.colors)
 
-                camera_frustum_geometry = generate_frustum_from_camera_extrinsics(cam_front_extrinsics, car_rotation, image_width, image_height, self.frustum_distance)
+                camera_frustum_geometry = generate_frustum_from_camera_extrinsics(cam_front_extrinsics, car_local_position, car_rotation, image_width, image_height, self.frustum_distance)
                 camera_frustum_geometry.translate(car_local_position)
 
             dense_lidar.points.extend(o3d.utility.Vector3dVector(static_lidar_geometry.points))
             dense_lidar.colors.extend(o3d.utility.Vector3dVector(static_lidar_geometry.colors))
             labels.extend(static_labels)
-
         
+            num += 1
         return dense_lidar, labels, Camera(camera_transform, camera_frustum_geometry, image_paths)
 
     def _get_previous_frame_paths(self, current_sample_index):

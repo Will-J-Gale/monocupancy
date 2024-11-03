@@ -7,6 +7,7 @@ from shelve import DbfilenameShelf
 from argparse import ArgumentParser
 
 import numpy as np
+import open3d as o3d
 from tqdm import tqdm
 
 from src.utils import generate_camera_view_occupancy, occupancy_grid_to_list, occupancy_indicies_to_numpy
@@ -14,7 +15,7 @@ from src.dense_lidar_generator import DenseLidarGenerator
 from src.constants import (
     STATIC_OBJECT_IDS, NUM_BOX_CLOUD_POINTS, OCCUPANCY_GRID_WIDTH,
     OCCUPANCY_GRID_HEIGHT, OCCUPANCY_GRID_DEPTH, NUM_FUTURE_SAMPLES,
-    FRUSTUM_DISTANCE, NUM_VIDEO_FRAMES, DEFAULT_VOXEL_SIZE
+    FRUSTUM_DISTANCE, NUM_VIDEO_FRAMES, DEFAULT_VOXEL_SIZE, GROUND_CLEARANCE
 )
 
 parser = ArgumentParser()
@@ -29,8 +30,8 @@ def process_scene(
         dataset_file:DbfilenameShelf,
         occupancy_data_output_dir:str,
         class_to_colour:dict, 
-        voxel_size:float, 
-        num_video_frames:int):
+        num_video_frames:int,
+        occupancy_grid_template:o3d.geometry.VoxelGrid):
     
     lidar_generator = DenseLidarGenerator(
         scene_samples,
@@ -43,20 +44,20 @@ def process_scene(
     )
 
     for dense_lidar, labels, camera in tqdm(lidar_generator, desc="Frame", leave=False):
-        occupancy = generate_camera_view_occupancy(
+        occupancy_result = generate_camera_view_occupancy(
             dense_lidar, 
             camera.transform, 
             OCCUPANCY_GRID_WIDTH, 
             OCCUPANCY_GRID_DEPTH, 
             OCCUPANCY_GRID_HEIGHT, 
-            voxel_size, 
-            camera
+            camera,
+            occupancy_grid_template
         )
 
         metadata = dataset_file["metadata"]
         index = metadata["length"]
 
-        occupancy_points_list, occupancy_colours = occupancy_grid_to_list(occupancy)
+        occupancy_points_list, occupancy_colours = occupancy_grid_to_list(occupancy_result.occupancy_grid)
         occupancy_numpy = occupancy_indicies_to_numpy(
             occupancy_points_list, 
             (metadata["num_width_voxels"], metadata["num_height_voxels"], metadata["num_depth_voxels"])
@@ -103,6 +104,9 @@ def main(args):
         num_occupied=0,
         num_not_occupied=0,
     )
+
+    occupancy_grid_template = o3d.geometry.VoxelGrid.create_dense([-OCCUPANCY_GRID_WIDTH/2, 0, -GROUND_CLEARANCE], [255, 255, 255], args.voxel_size, OCCUPANCY_GRID_WIDTH, OCCUPANCY_GRID_DEPTH, OCCUPANCY_GRID_HEIGHT)
+    [occupancy_grid_template.remove_voxel(voxel.grid_index) for voxel in occupancy_grid_template.get_voxels()]
     
     try:
         for i in tqdm(range(num_scenes), desc="Scene"):
@@ -112,8 +116,8 @@ def main(args):
                 dataset,
                 occupancy_data_output_dir,
                 class_to_colour, 
-                args.voxel_size, 
                 args.num_video_frames, 
+                occupancy_grid_template
             )
     except KeyboardInterrupt:
         return
