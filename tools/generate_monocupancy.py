@@ -67,7 +67,7 @@ def process_scene(
             occupancy_data_path, 
             occupancy_grid=occupancy_numpy,
             occupancy_indicies=np.array(occupancy_points_list, dtype=np.uint8),
-            occupancy_colours=occupancy_colours,
+            occupancy_colours=np.array(occupancy_colours, dtype=np.uint8),
             occupancy_labels=np.array(labels, dtype=np.uint8)
         )
         data = {
