@@ -1,10 +1,11 @@
 # Monocupancy
-Monocular occupancy dataset generator
+### 3D Monocular occupancy dataset generation and prediction using nuScenes dataset
+[<img src="images/monocupancy.gif">](https://www.youtube.com/watch?v=fbtTDVu5Pc8)
 
 ## Setup
 * `pip install requirements.txt`
 
-### Download
+### Download nuScenes dataset
 * https://www.nuscenes.org/download  
 * Make sure to download:
     * Full dataset
@@ -37,6 +38,7 @@ Monocular occupancy dataset generator
     * Runs the dataset generator in interactive mode
     * Displays the combined dense pointcloud from multiple frames
     * Displays resultant occupancy grid for the camera frustum
+    * [<img src="images/interactive.jpg">]()
 * `tools/view_occupancy_grid.py --dataset nuscenes_simplified.dataset --scene <SCENE_NUM>`
     * View the monocupancy dataset generated from `test/generate_monocupancy.py`
 

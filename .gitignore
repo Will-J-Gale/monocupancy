@@ -7,3 +7,5 @@ test/*
 
 **/logs/**
 **/weights*/*
+
+!images/*
