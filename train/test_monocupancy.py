@@ -13,6 +13,8 @@ from monocupancy import Monocupancy
 
 MODEL_INPUT_SIZE = (512, 256)
 MODEL_INPUT_CHANNELS = 3
+WINDOW_WIDTH = 1920//2
+WINDOW_HEIGHT = 1080
 CAMERA_X = 18
 VOXEL_COLOUR = (1.0, 1.0, 1.0)
 
@@ -58,7 +60,7 @@ def generate_model_input(data):
 
     return train_X, train_Y, cv2.imread(data["image_paths"][-1])
 
-def create_window(name, width=1920//2, height=1080, x=0, y=0):
+def create_window(name, width=WINDOW_WIDTH, height=WINDOW_HEIGHT, x=0, y=0):
     window = gui.Application.instance.create_window(name, width, height, x, y)
     scene_widget = gui.SceneWidget()
     scene = rendering.Open3DScene(window.renderer)
@@ -90,8 +92,8 @@ def main(args):
     gui.Application.instance.initialize()
 
     inp = Input()
-    target_vis, target_window = create_window("Target", width=1920//2, height=1080, x=0, y=0)
-    prediction_vis, prediction_window = create_window("Prediction", width=1920//2, height=1080, x=1920//2, y=0)
+    target_vis, target_window = create_window("Target", x=0, y=0)
+    prediction_vis, prediction_window = create_window("Prediction", x=WINDOW_WIDTH, y=0)
 
     dataset = shelve.open(args.dataset, "r")
     metadata = dataset["metadata"]
