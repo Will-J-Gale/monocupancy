@@ -17,6 +17,7 @@ OCCUPANCY_SIZE = 0.3
 OCCUPANCY_GRID_WIDTH = 35
 OCCUPANCY_GRID_DEPTH = 35
 OCCUPANCY_GRID_HEIGHT = 10
+CAMERA_X = 18
 UPDATE_CAMERA = True
 
 DEFAULT_MATERIAL = rendering.MaterialRecord()
@@ -38,7 +39,7 @@ def create_window(name, width=1920//2, height=1080, x=0, y=0):
     material.shader = "defaultLit"
 
     scene_widget.scene.scene.enable_sun_light(True)
-    scene.camera.look_at([12, 25, 0], [12, -12, 15], [0, 1, 0])
+    scene.camera.look_at([CAMERA_X, 25, 0], [CAMERA_X, -12, 15], [0, 1, 0])
 
     return scene
 
@@ -60,9 +61,6 @@ def main(args):
     inp = Input()
     gui.Application.instance.initialize()
     vis = create_window("Target", width=1920//2, height=1080, x=0, y=0)
-    # vis = o3d.visualization.Visualizer()
-    # vis.create_window("Occupancy", 1920//2, 1080, 0, 0)
-    # vis.get_render_option().background_color = np.asarray([0, 0, 0])
     index = 0
 
     dataset = shelve.open(args.occupancy_path, "r")
@@ -86,9 +84,6 @@ def main(args):
 
     vis.add_geometry("voxels", voxel_grid, DEFAULT_MATERIAL)
 
-    origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=10, origin=[0, 0, 0]) 
-    vis.add_geometry("origin", origin, DEFAULT_MATERIAL)
-
     while(True):
         if(inp.get_key_down("q")):
             break
@@ -106,7 +101,6 @@ def main(args):
 
             vis.clear_geometry()
             vis.add_geometry("voxels", voxel_grid, DEFAULT_MATERIAL)
-            vis.add_geometry("origin", origin, DEFAULT_MATERIAL)
             
         gui.Application.instance.run_one_tick()
 
